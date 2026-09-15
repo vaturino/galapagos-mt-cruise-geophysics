@@ -1,0 +1,13 @@
+<data>
+  <name>Sidescan_5m</name>
+  <type>tiled_grid</type>
+  <url>file:///Users/valeturino/postdoc_local/Cruise_Galapagos_2026/GMRT_regional/Backscatter_MGDS/MGL1106_CostaRica_CRISP/</url>
+  <x_min>489.95550537109375</x_min>
+  <x_max>490.7452392578125</x_max>
+  <y_min>-16.142578125</y_min>
+  <y_max>-14.80743408203125</y_max>
+  <z_min>-83.42007492065429</z_min>
+  <z_max>40.549925079345705</z_max>
+  <res_min>256</res_min>
+  <res_max>16384</res_max>
+</data>

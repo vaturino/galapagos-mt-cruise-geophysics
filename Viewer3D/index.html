@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bathymetry 3D Viewer</title>
+<link rel="stylesheet" href="./cesium/Widgets/widgets.css">
+<link rel="stylesheet" href="./style.css">
+<script>window.CESIUM_BASE_URL = './cesium/';</script>
+<script src="./cesium/Cesium.js"></script>
+</head>
+<body>
+  <div id="cesiumContainer"></div>
+
+  <div id="panel">
+    <div class="panel-title">Datasets</div>
+
+    <div class="control-group">
+      <details class="ds-section" id="dsSection-bathymetry" open>
+        <summary>Bathymetry</summary>
+        <div id="datasetList-bathymetry" class="ds-section-list"></div>
+      </details>
+
+      <details class="ds-section" id="dsSection-backscatter">
+        <summary>Backscatter</summary>
+        <div class="ds-section-note hint-text">Backscatter is an alternate colouring of a bathymetry dataset's own mesh, not a separate layer -- check a dataset below to show it, then pick Depth/Backscatter colouring.</div>
+        <div class="radio-row">
+          <label><input type="radio" name="colorMode" value="depth" checked> Depth</label>
+          <label><input type="radio" name="colorMode" value="backscatter"> Backscatter</label>
+        </div>
+        <div id="datasetList-backscatter" class="ds-section-list"></div>
+      </details>
+
+      <details class="ds-section" id="dsSection-geophysics">
+        <summary>Geophysics</summary>
+        <div class="ds-section-note hint-text">Gravity, magnetics, crustal thickness and thermal anomaly grids from GMRT_regional/Geophysics_MGDS, draped on regional terrain for 3D context. Coloured by value, not elevation -- see each layer's legend for units.</div>
+        <div id="datasetList-geophysics" class="ds-section-list"></div>
+      </details>
+    </div>
+
+    <div class="control-group">
+      <label>Legend</label>
+      <div id="legendList"><div class="legend-empty">Check a dataset to see its colour scale.</div></div>
+    </div>
+
+    <div class="control-group">
+      <label for="exagSlider">Vertical exaggeration: <span id="exagValue">2.0&times;</span></label>
+      <input type="range" id="exagSlider" min="1" max="30" step="0.5" value="2">
+    </div>
+
+    <div class="control-group">
+      <label><input type="checkbox" id="lightingToggle" checked> Relief shading (sun-lit normals)</label>
+    </div>
+
+    <div class="control-group">
+      <div class="cam-hint">Drag with the mouse to move the camera: left-drag rotates/orbits, scroll or right-drag zooms, middle-drag (or ctrl+left-drag) tilts. The buttons below do the same thing if you prefer clicking.</div>
+      <div class="cam-grid">
+        <button id="rotateLeftBtn" title="Rotate left">&#8634;</button>
+        <button id="tiltUpBtn" title="Tilt up">&#8593;</button>
+        <button id="rotateRightBtn" title="Rotate right">&#8635;</button>
+        <button id="zoomInBtn" title="Zoom in">+</button>
+        <button id="tiltDownBtn" title="Tilt down">&#8595;</button>
+        <button id="zoomOutBtn" title="Zoom out">&minus;</button>
+      </div>
+    </div>
+
+    <div class="control-group">
+      <button id="resetViewBtn">Reset view</button>
+    </div>
+
+    <div class="control-group" id="statsBox"></div>
+
+    <div class="control-group" id="pickBox">Click the surface to read depth / backscatter at a point.</div>
+
+    <div class="control-group">
+      <label>Track points (CSV upload)</label>
+      <input type="file" id="trackCsvInput" accept=".csv,text/csv">
+      <div class="track-buttons">
+        <button id="clearTrackBtn">Clear points</button>
+      </div>
+      <div id="trackStatus" class="hint-text">Upload a CSV with lat/lon columns (optional name/label column). Points snap onto the currently-visible seafloor surface.</div>
+    </div>
+
+    <div class="control-group">
+      <label>Export</label>
+      <button id="exportGeoTiffBtn">Export visible layers as GeoTIFF</button>
+      <div id="exportStatus" class="hint-text">Exports a georeferenced 2D GeoTIFF of every checked dataset (plus any uploaded track points), composited coarse-to-fine.</div>
+    </div>
+  </div>
+
+  <div id="loading">
+    <div id="loadingText">Loading terrain&hellip;</div>
+    <div id="loadingBarOuter"><div id="loadingBarInner"></div></div>
+  </div>
+
+  <script src="./app.js"></script>
+</body>
+</html>

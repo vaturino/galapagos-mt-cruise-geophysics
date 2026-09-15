@@ -1,0 +1,43 @@
+# Large binary data — see DATA_MANIFEST.md for sources; scripts/ regenerates
+# GeoMapApp-ready and viewer-ready copies from those sources.
+*.grd
+*.tif
+*.tiff
+*.asc
+*.nc
+*.gz
+*.tar
+*.zip
+
+# Cruise-internal, non-public dataset (see root README.md's Data section)
+GeoMapApp_ready/
+
+# Vendored CesiumJS build — fetch from the `cesium` npm package instead
+Viewer3D/cesium/
+
+# Generated viewer meshes/manifest — regenerate with scripts/build_cesium_mesh.py
+# and scripts/build_geophysics_drape.py (see Viewer3D/README.md)
+Viewer3D/data/
+
+# Python virtual environment — recreate per-machine with scripts/setup_env.sh
+scripts/venv/
+scripts/__pycache__/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+._*
+
+# Editor/OS cruft
+*.swp
+.Trash*
+
+# macOS external-volume metadata folders
+.fseventsd/
+.Trashes/
+.Spotlight-V100/
+.TemporaryItems/
+
+# Script run logs (not documentation)
+*.log
