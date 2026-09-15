@@ -2,16 +2,20 @@
 
 Gravity, magnetics, and seismic products for the Central America ↔
 Galápagos corridor, sourced from the Marine Geoscience Data System (MGDS).
-Dataset identifiers and sources are in
-[`DATA_MANIFEST.md`](../../DATA_MANIFEST.md).
+Dataset identifiers, dataset-page links, and DOIs for everything below are
+in [`DATA_MANIFEST.md`](../../DATA_MANIFEST.md) — that's the file to use to
+re-fetch any of this from scratch.
 
 ## Coverage
 
-**None of the products below actually cover the Galápagos platform
-itself** — the corridor-wide search that found them surfaced genuine
-regional compilations, but for the subduction zone and spreading center on
-either side of the platform, not the platform's own footprint (roughly
-89–92°W, 1.5°S–1°N).
+**None of the gravity/magnetics/seismic products below actually cover the
+Galápagos platform itself** — the corridor-wide search that found them
+surfaced genuine regional compilations, but for the subduction zone and
+spreading center on either side of the platform, not the platform's own
+footprint (roughly 89–92°W, 1.5°S–1°N). This is specific to geophysics —
+`../Backscatter_MGDS/AT50-09BC_GalapagosPlatform_Bathymetry/` (see
+[`Backscatter_MGDS/README.md`](../Backscatter_MGDS/README.md)) does cover
+the platform, just with bathymetry rather than gravity/magnetics/seismic.
 
 | Dataset | Region | Overlaps the Galápagos platform? |
 |---|---|---|
@@ -28,32 +32,38 @@ actually covers the platform.
 
 ## What's here
 
-- **`Barckhausen_CentralAmerica_Magnetics/`** — regional magnetic anomaly
+- **`Barckhausen_CentralAmerica_Magnetics/`** ([dataset page](https://www.marine-geo.org/tools/datasets/6524),
+  [DOI](https://doi.org/10.1594/IEDA/306524)) — regional magnetic anomaly
   (IGRF removed) compilation. `central_america_mag.grd` is the original
   (old-style GMT, won't open in GeoMapApp as-is); use
   `central_america_mag_geomapapp.grd`.
 
-- **`Bassett_CentralAmerica_ResidualGravity/`** — residual free-air gravity
+- **`Bassett_CentralAmerica_ResidualGravity/`** ([dataset page](https://www.marine-geo.org/tools/datasets/24026),
+  [DOI](https://doi.org/10.1594/IEDA/324026)) — residual free-air gravity
   anomaly over the Central America subduction zone, one region pulled from
   a global 18-region compilation. `CentAm_Residual_gravity.grd` is the
   original (0–360° longitude); use `CentAm_Residual_gravity_geomapapp.grd`.
 
-- **`SR1806_CocosNazca_Gravity/`** — six processed gravity products from
-  cruise SR1806 (2018) at the Cocos-Nazca spreading center, already in
-  GeoMapApp-native format, no conversion needed: `105W95W1S5N_mba.grd`
-  (mantle Bouguer anomaly), `_mba_global_topo_global_FAA.grd` /
-  `_mba_ship_topo_global_FAA.grd` (two MBA variants by input topography/FAA
-  source), `_rmba_1k.grd` (residual mantle Bouguer anomaly), `_crust_1k.grd`
-  (gravity-derived crustal thickness), `_thermal_1k.grd` (1-D half-space
-  cooling thermal model).
+- **`SR1806_CocosNazca_Gravity/`** ([dataset page](https://www.marine-geo.org/tools/datasets/31302),
+  data DOI [10.5281/zenodo.7590816](https://doi.org/10.5281/zenodo.7590816),
+  paper DOI [10.1029/2022GL102133](https://doi.org/10.1029/2022GL102133)) —
+  six processed gravity products from cruise SR1806 (2018) at the
+  Cocos-Nazca spreading center, already in GeoMapApp-native format, no
+  conversion needed: `105W95W1S5N_mba.grd` (mantle Bouguer anomaly),
+  `_mba_global_topo_global_FAA.grd` / `_mba_ship_topo_global_FAA.grd` (two
+  MBA variants by input topography/FAA source), `_rmba_1k.grd` (residual
+  mantle Bouguer anomaly), `_crust_1k.grd` (gravity-derived crustal
+  thickness), `_thermal_1k.grd` (1-D half-space cooling thermal model).
 
-- **`Mittelstaedt_GalapagosIslands_Gravity/`** — onshore free-air gravity
-  stations on Santa Cruz and San Cristóbal (Cleary et al., 2020,
-  [doi:10.1029/2019GC008722](https://doi.org/10.1029/2019GC008722)). Empty:
+- **`Mittelstaedt_GalapagosIslands_Gravity/`** ([dataset page](https://www.marine-geo.org/tools/datasets/26493),
+  data DOI [10.1594/IEDA/326493](https://doi.org/10.1594/IEDA/326493)) —
+  onshore free-air gravity stations on Santa Cruz and San Cristóbal (Cleary
+  et al., 2020, paper DOI
+  [10.1029/2019GC008722](https://doi.org/10.1029/2019GC008722)). Empty:
   MGDS served the source file (`Cleary_et_al_Galapagos_FAA_data.txt.gz`) as
-  a genuine 0-byte file on two separate download attempts. If this data is
-  needed, check the paper's supplementary material, or report the broken
-  file to MGDS.
+  a genuine 0-byte file on two separate download attempts, despite the
+  dataset page listing it at 13.0kB. If this data is needed, check the
+  paper's supplementary material, or report the broken file to MGDS.
 
 ## Not included
 
@@ -64,13 +74,14 @@ actually covers the platform.
 - All but one of 77 seismic-tagged datasets in the corridor are raw SEGY
   shot/stack data, navigation files, or PDF quick-look plots — not usable
   without dedicated seismic-processing software.
-- **MGL2304 "MarineIGUANA/IGUANA"** (MGDS UID 33013): a 3-D P- and S-wave
-  seismic tomography model of the Galápagos Plume mantle structure
-  (Hufstetler, Hooft, Toomey, Ito et al., 2026) — the one genuinely
-  platform-covering processed seismic product found, and the only seismic
-  exception to the raw-data pattern above. Not included: access-restricted.
-  If this changes, note that it's a 3-D volume (longitude/latitude/depth,
-  UTM zone 35N, NetCDF4/HDF5), a different structure from every other grid
-  in this project — `scripts/fix_mgds_grid.py` and its underlying
-  NetCDF3-only reader can't open it as-is, and it would likely need
-  depth-slicing into 2-D grids to visualize alongside everything else here.
+- **MGL2304 "MarineIGUANA/IGUANA"** ([UID 33013](https://www.marine-geo.org/tools/datasets/33013)):
+  a 3-D P- and S-wave seismic tomography model of the Galápagos Plume
+  mantle structure (Hufstetler, Hooft, Toomey, Ito et al., 2026) — the one
+  genuinely platform-covering processed seismic product found, and the
+  only seismic exception to the raw-data pattern above. Not included:
+  access-restricted. If this changes, note that it's a 3-D volume
+  (longitude/latitude/depth, UTM zone 35N, NetCDF4/HDF5), a different
+  structure from every other grid in this project —
+  `scripts/fix_mgds_grid.py` and its underlying NetCDF3-only reader can't
+  open it as-is, and it would likely need depth-slicing into 2-D grids to
+  visualize alongside everything else here.

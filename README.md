@@ -57,5 +57,9 @@ GitHub's 100 MB per-file limit outright.
 ## Known gaps
 
 - No dataset in this project currently covers the Galápagos platform itself
-  with processed gravity, magnetics, or seismic data. `GMRT_regional/Geophysics_MGDS/README.md`
+  with processed gravity, magnetics, or seismic data —
+  [`GMRT_regional/Geophysics_MGDS/README.md`](GMRT_regional/Geophysics_MGDS/README.md)
   documents what was searched and why the platform itself came up empty.
+  Bathymetry is not affected by this gap:
+  [`GMRT_regional/Backscatter_MGDS/AT50-09BC_GalapagosPlatform_Bathymetry/`](GMRT_regional/Backscatter_MGDS/README.md)
+  covers the platform itself at 15–50 m resolution.

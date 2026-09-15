@@ -207,6 +207,17 @@ def main():
 
     x, y, z = load_any(args.input)
 
+    # Some MGDS grids (observed in the AT50-09BC bathymetry set) encode
+    # nodata as literal IEEE +/-Infinity in the z array itself, with no
+    # _FillValue attribute to catch it -- np.nanmin/nanmax do NOT treat inf
+    # as missing, so left alone this bakes an infinite value straight into
+    # the output grid's actual_range and data. Always scrub it.
+    n_nonfinite = int(np.isinf(z).sum())
+    if n_nonfinite:
+        z = np.where(np.isinf(z), np.nan, z)
+        print(f"{args.input}: replaced {n_nonfinite} +/-inf nodata cell(s) with NaN "
+              f"(no _FillValue attribute present)")
+
     is_geographic = (
         np.nanmax(np.abs(x)) <= GEOGRAPHIC_LIMIT and np.nanmax(np.abs(y)) <= 90.5
     )
