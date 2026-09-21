@@ -73,18 +73,48 @@
     <div class="control-group" id="pickBox">Click the surface to read depth / backscatter at a point.</div>
 
     <div class="control-group">
+      <label>Cross-section</label>
+      <div class="track-buttons cross-section-buttons">
+        <button id="crossSectionPickBtn">Pick 2 points</button>
+        <button id="crossSectionClearBtn">Clear</button>
+      </div>
+      <div id="crossSectionStatus" class="hint-text"></div>
+      <canvas id="crossSectionCanvas" width="232" height="148" class="cross-section-canvas"></canvas>
+      <div id="crossSectionSummary" class="hint-text"></div>
+      <div class="track-buttons cross-section-buttons">
+        <button id="crossSectionDownloadCsvBtn" disabled>Download CSV</button>
+        <button id="crossSectionDownloadPngBtn" disabled>Download PNG</button>
+      </div>
+    </div>
+
+    <div class="control-group">
       <label>Track points (CSV upload)</label>
       <input type="file" id="trackCsvInput" accept=".csv,text/csv">
       <div class="track-buttons">
         <button id="clearTrackBtn">Clear points</button>
       </div>
-      <div id="trackStatus" class="hint-text">Upload a CSV with lat/lon columns (optional name/label column). Points snap onto the currently-visible seafloor surface.</div>
+      <div id="trackStatus" class="hint-text">Upload a CSV with lat/lon columns (optional name/label column, optional status column -- see legend below). Points snap onto the currently-visible seafloor surface.</div>
+      <div id="trackLegend" class="track-legend"></div>
     </div>
 
     <div class="control-group">
       <label>Export</label>
+      <div class="radio-row">
+        <label><input type="radio" name="exportFormat" value="color" checked> Colour (picture)</label>
+        <label><input type="radio" name="exportFormat" value="elevation"> Elevation (analysis)</label>
+      </div>
+      <div class="hint-text">"Colour" is an RGBA picture of the mesh (for GIS/visual reference). "Elevation" is a single-band float32 GeoTIFF of real depth/elevation in metres (NaN nodata) -- use this for slope/roughness/terrain analysis. Geophysics layers are skipped in Elevation format (they drape on borrowed terrain, not their own data).</div>
+      <div class="radio-row" style="margin-top: 8px;">
+        <label><input type="radio" name="exportRegionMode" value="entire" checked> Entire region</label>
+        <label><input type="radio" name="exportRegionMode" value="select"> Select region</label>
+      </div>
+      <div id="exportRegionControls" class="track-buttons cross-section-buttons" style="display: none;">
+        <button id="exportDrawRectBtn">Draw rectangle</button>
+        <button id="exportClearRectBtn">Clear</button>
+      </div>
+      <div id="exportRegionStatus" class="hint-text" style="display: none;"></div>
       <button id="exportGeoTiffBtn">Export visible layers as GeoTIFF</button>
-      <div id="exportStatus" class="hint-text">Exports a georeferenced 2D GeoTIFF of every checked dataset (plus any uploaded track points), composited coarse-to-fine.</div>
+      <div id="exportStatus" class="hint-text">Exports a georeferenced 2D GeoTIFF of every checked (and format-eligible) dataset, composited coarse-to-fine. "Select region" drags a rectangle on the map to export just that area.</div>
     </div>
   </div>
 

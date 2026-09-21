@@ -74,6 +74,15 @@ button:hover {
   background: #26333f;
 }
 
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button:disabled:hover {
+  background: #1c2733;
+}
+
 input[type="range"] {
   width: 100%;
 }
@@ -255,6 +264,52 @@ input[type="range"] {
 
 .track-buttons {
   margin-top: 6px;
+}
+
+.cross-section-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.cross-section-buttons button {
+  flex: 1;
+}
+
+#exportGeoTiffBtn {
+  margin-top: 8px;
+}
+
+.cross-section-canvas {
+  display: block;
+  margin-top: 8px;
+  background: #10161f;
+  border: 1px solid #2b3742;
+  border-radius: 5px;
+}
+
+.track-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.track-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: #d3d9df;
+}
+
+.track-legend-swatch {
+  width: 11px;
+  height: 11px;
+  min-width: 11px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  display: inline-block;
 }
 
 #loading {

@@ -236,6 +236,7 @@ def main():
         "triangle_count": int(tris.shape[0]),
         "stride": stride,
         "effective_resolution_m": eff_res_m,
+        "native_resolution_m": dx_deg * 111320,
         "rtc_center_ecef": ecef.mean(axis=0).tolist(),
         "bbox": {
             "lon_min": math.degrees(float(lon_v.min())),

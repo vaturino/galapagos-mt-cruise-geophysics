@@ -198,15 +198,24 @@ def apply_globe_colormap(z_m, ocean_stops, land_stops):
     return out
 
 
-def compute_smooth_normals(ecef_xyz, tris):
-    """Vectorised per-vertex normals via face-normal accumulation."""
-    v0 = ecef_xyz[tris[:, 0]]
-    v1 = ecef_xyz[tris[:, 1]]
-    v2 = ecef_xyz[tris[:, 2]]
-    face_n = np.cross(v1 - v0, v2 - v0)
-    normals = np.zeros_like(ecef_xyz)
-    for k in range(3):
-        np.add.at(normals, tris[:, k], face_n)
+def compute_smooth_normals(ecef_xyz, tris, chunk_tris=4_000_000):
+    """Vectorised per-vertex normals via face-normal accumulation, processed in
+    triangle chunks so peak memory stays bounded regardless of mesh size --
+    the naive one-shot version materialises 4 full (n_tris, 3) float64 arrays
+    (v0/v1/v2/face_n) at once, which is what OOM-killed builds at native
+    resolution (e.g. ~2 GB extra just for those arrays at ~20M triangles)."""
+    ecef32 = ecef_xyz.astype(np.float32, copy=False)
+    normals = np.zeros_like(ecef32)
+    n_tris = tris.shape[0]
+    for t0 in range(0, n_tris, chunk_tris):
+        t1 = min(n_tris, t0 + chunk_tris)
+        tri_chunk = tris[t0:t1]
+        v0 = ecef32[tri_chunk[:, 0]]
+        v1 = ecef32[tri_chunk[:, 1]]
+        v2 = ecef32[tri_chunk[:, 2]]
+        face_n = np.cross(v1 - v0, v2 - v0)
+        for k in range(3):
+            np.add.at(normals, tri_chunk[:, k], face_n)
     lens = np.linalg.norm(normals, axis=1)
     lens[lens == 0] = 1.0
     normals /= lens[:, None]
@@ -234,38 +243,59 @@ def decimate_one_grid(path, stride, positive_down):
     """Read one bathy grid, crop to its own finite bbox, decimate by `stride`,
     and return (lon_rad, lat_rad, z_m, local_tris) for just that grid -- tris
     index into this grid's own lon/lat/z arrays (0-based), caller offsets them
-    when concatenating multiple grids."""
+    when concatenating multiple grids.
+
+    Streams one decimated row at a time rather than materialising the full
+    (rows x cols) bounding-box grid as dense lon/lat/z/vert_id arrays -- for a
+    sparse mosaic (MV1007 and GSC_regional are both only ~17% populated
+    within their own bbox) the old dense approach held ~6x more memory than
+    the actual output needed, which is what OOM-killed native-stride builds.
+    Only ever holds one or two decimated rows plus the accumulated compact
+    output in memory at a time."""
     x, y, z, nc = read_grd(path)
     ny, nx = z.shape
     r0, r1, c0, c1 = tight_bbox(z)
     rows = np.arange(r0, r1 + 1, stride)
     cols = np.arange(c0, c1 + 1, stride)
+    lon_cols = np.radians(x[cols])
+    ncols = len(cols)
 
-    z_sub = np.asarray(z[np.ix_(rows, cols)]).astype(np.float64)
-    if positive_down:
-        z_sub = -z_sub
-    lon_sub = np.radians(x[cols])
-    lat_sub = np.radians(y[rows])
-    lon_grid, lat_grid = np.meshgrid(lon_sub, lat_sub)
+    lon_parts, lat_parts, z_parts, tri_parts = [], [], [], []
+    prev_ids = None
+    next_id = 0
 
-    finite = np.isfinite(z_sub)
-    nr, ncols_ = z_sub.shape
-    vert_id = -np.ones((nr, ncols_), dtype=np.int64)
-    vert_id[finite] = np.arange(finite.sum())
+    for ridx in rows:
+        row_full = np.asarray(z[int(ridx), :])
+        row_z = row_full[cols].astype(np.float64)
+        if positive_down:
+            row_z = -row_z
+        finite = np.isfinite(row_z)
+        n_new = int(finite.sum())
+        curr_ids = np.full(ncols, -1, dtype=np.int32)
+        if n_new:
+            curr_ids[finite] = next_id + np.arange(n_new)
+            lon_parts.append(lon_cols[finite])
+            lat_parts.append(np.full(n_new, math.radians(float(y[ridx])), dtype=np.float64))
+            z_parts.append(row_z[finite].astype(np.float32))
+            next_id += n_new
 
-    lon_v = lon_grid[finite]
-    lat_v = lat_grid[finite]
-    z_v = z_sub[finite].astype(np.float32)
+        if prev_ids is not None:
+            a, b = prev_ids[:-1], prev_ids[1:]
+            c, d = curr_ids[:-1], curr_ids[1:]
+            ok = (a >= 0) & (b >= 0) & (c >= 0) & (d >= 0)
+            if ok.any():
+                ai, bi, ci, di = a[ok], b[ok], c[ok], d[ok]
+                tri1 = np.stack([ai, bi, di], axis=1)
+                tri2 = np.stack([ai, di, ci], axis=1)
+                tri_parts.append(np.concatenate([tri1, tri2], axis=0))
 
-    a = vert_id[:-1, :-1]
-    b = vert_id[:-1, 1:]
-    c = vert_id[1:, :-1]
-    d = vert_id[1:, 1:]
-    ok = (a >= 0) & (b >= 0) & (c >= 0) & (d >= 0)
-    ai, bi, ci, di = a[ok], b[ok], c[ok], d[ok]
-    tri1 = np.stack([ai, bi, di], axis=1)
-    tri2 = np.stack([ai, di, ci], axis=1)
-    tris = np.concatenate([tri1, tri2], axis=0).astype(np.int64)
+        prev_ids = curr_ids
+
+    lon_v = np.concatenate(lon_parts) if lon_parts else np.zeros(0, dtype=np.float64)
+    lat_v = np.concatenate(lat_parts) if lat_parts else np.zeros(0, dtype=np.float64)
+    z_v = np.concatenate(z_parts) if z_parts else np.zeros(0, dtype=np.float32)
+    tris = (np.concatenate(tri_parts, axis=0)
+            if tri_parts else np.zeros((0, 3), dtype=np.int32))
 
     nc.close()
     return lon_v, lat_v, z_v, tris, (nx, ny), (r0, r1, c0, c1)
@@ -345,14 +375,17 @@ def main():
         lon_parts.append(lon_v)
         lat_parts.append(lat_v)
         z_parts.append(z_v)
-        tri_parts.append(tris + vert_offset)
+        if vert_offset:
+            tris += vert_offset  # tris is ours alone (fresh from decimate_one_grid) -- mutate in place, no copy
+        tri_parts.append(tris)
         vert_offset += lon_v.shape[0]
         log(f"  {lon_v.shape[0]:,} vertices, {tris.shape[0]:,} triangles")
 
-    lon_v = np.concatenate(lon_parts)
-    lat_v = np.concatenate(lat_parts)
-    z_v = np.concatenate(z_parts)
-    tris = np.concatenate(tri_parts).astype(np.uint32)
+    # avoid a redundant full-array copy in the (common) single-tile case
+    lon_v = lon_parts[0] if len(lon_parts) == 1 else np.concatenate(lon_parts)
+    lat_v = lat_parts[0] if len(lat_parts) == 1 else np.concatenate(lat_parts)
+    z_v = z_parts[0] if len(z_parts) == 1 else np.concatenate(z_parts)
+    tris = (tri_parts[0] if len(tri_parts) == 1 else np.concatenate(tri_parts)).astype(np.uint32)
     n_vert = lon_v.shape[0]
     log(f"  total: {n_vert:,} vertices, {tris.shape[0]:,} triangles")
 
@@ -396,15 +429,23 @@ def main():
         sx, sy, sz, snc = read_grd(args.backscatter)
         s_dx = sx[1] - sx[0]
         s_dy = sy[1] - sy[0]
-        col_idx = np.round((np.degrees(lon_v) - sx[0]) / s_dx).astype(np.int64)
-        row_idx = np.round((np.degrees(lat_v) - sy[0]) / s_dy).astype(np.int64)
+        # int32 is plenty (grid dims are always << 2^31) and halves the size of
+        # these two n_vert-length index arrays vs. the old int64
+        col_idx = np.round((np.degrees(lon_v) - sx[0]) / s_dx).astype(np.int32)
+        row_idx = np.round((np.degrees(lat_v) - sy[0]) / s_dy).astype(np.int32)
         sny, snx = sz.shape
         in_range = (col_idx >= 0) & (col_idx < snx) & (row_idx >= 0) & (row_idx < sny)
-        bs_vals = np.full(n_vert, np.nan, dtype=np.float64)
         ci_ok = col_idx[in_range]
         ri_ok = row_idx[in_range]
-        sz_arr = np.asarray(sz)  # backscatter mosaic is smaller; safe to materialise
-        bs_vals[in_range] = sz_arr[ri_ok, ci_ok]
+        del col_idx, row_idx
+        bs_vals = np.full(n_vert, np.nan, dtype=np.float64)
+        # index the memmap directly -- fancy indexing only copies the n_vert
+        # sampled cells, not the whole grid. The old `np.asarray(sz)` forced a
+        # full materialisation of the source grid first, on the (wrong, for
+        # MV1007: 78.4M cells vs. 14.5M populated bathy vertices) assumption
+        # that the backscatter mosaic is always smaller than the mesh.
+        bs_vals[in_range] = sz[ri_ok, ci_ok]
+        del ci_ok, ri_ok, in_range
         bs_valid = np.isfinite(bs_vals)
         log(f"  backscatter matched at {bs_valid.sum():,} / {n_vert:,} vertices")
         if bs_valid.any():
@@ -417,16 +458,27 @@ def main():
             has_backscatter = True
             bs_values_full = bs_vals.astype(np.float32)  # NaN where no match, for click read-out
             bs_colormap_stops_meta = {"domain": "relative_0_1", "stops": bs_stops.tolist()}
+        del bs_vals
         snc.close()
 
     # ---- write mesh.bin ----
     mesh_path = out_dir / "mesh.bin"
     sections = []
 
-    def write_section(f, name, arr):
+    def write_section(f, name, arr, dtype=None):
+        # Only cast/copy if the dtype actually needs to change -- the old code
+        # unconditionally called `.astype(...)` at every call site (always a
+        # copy, even when the dtype already matched) and then `.tobytes()`
+        # (another full-size copy, as a Python bytes object) before writing.
+        # For the biggest sections (indices ~344 MB, normals ~174 MB at
+        # MV1007-native scale) that was up to 3x the array's own size alive
+        # at once. `tofile()` writes straight from the array's buffer with no
+        # intermediate bytes copy.
+        if dtype is not None and arr.dtype != dtype:
+            arr = arr.astype(dtype)
         arr = np.ascontiguousarray(arr)
         offset = f.tell()
-        f.write(arr.tobytes())
+        arr.tofile(f)
         sections.append({
             "name": name,
             "offset": offset,
@@ -437,15 +489,15 @@ def main():
         })
 
     with open(mesh_path, "wb") as f:
-        write_section(f, "lon_rad", lon_v.astype(np.float64))
-        write_section(f, "lat_rad", lat_v.astype(np.float64))
-        write_section(f, "z_m", z_v.astype(np.float32))
-        write_section(f, "normal", normals.astype(np.float32))
-        write_section(f, "color_depth", color_depth.astype(np.uint8))
+        write_section(f, "lon_rad", lon_v, dtype=np.float64)
+        write_section(f, "lat_rad", lat_v, dtype=np.float64)
+        write_section(f, "z_m", z_v, dtype=np.float32)
+        write_section(f, "normal", normals, dtype=np.float32)
+        write_section(f, "color_depth", color_depth, dtype=np.uint8)
         if has_backscatter:
-            write_section(f, "color_backscatter", color_bs.astype(np.uint8))
-            write_section(f, "value_backscatter", bs_values_full.astype(np.float32))
-        write_section(f, "indices", tris.astype(np.uint32))
+            write_section(f, "color_backscatter", color_bs, dtype=np.uint8)
+            write_section(f, "value_backscatter", bs_values_full, dtype=np.float32)
+        write_section(f, "indices", tris, dtype=np.uint32)
 
     meta = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -456,6 +508,7 @@ def main():
         "triangle_count": int(tris.shape[0]),
         "stride": stride,
         "effective_resolution_m": eff_res_m,
+        "native_resolution_m": ref_dx * 111320,
         "dlon_deg": dlon_deg,
         "dlat_deg": dlat_deg,
         "rtc_center_ecef": center.tolist(),

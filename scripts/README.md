@@ -80,6 +80,19 @@ works with no environment and no internet at all.
   `gmt_grd_to_geotiff.py` or `gmrt_to_xyz.py` for any new MGDS pull. Needs
   numpy, scipy, tifffile.
 
+- **`terrain_derivatives.py`** — slope magnitude, downslope direction
+  (azimuth clockwise from north), and seafloor roughness (Wilson TRI,
+  plane-detrended std-dev at several window sizes, Vector Ruggedness Measure)
+  from a bathymetry/elevation GeoTIFF or `.grd`. Reprojects lon/lat input
+  onto a metric UTM grid first (own pure-numpy UTM, no pyproj/GDAL), then
+  writes one float32 GeoTIFF per product with the UTM EPSG baked in, into a
+  `derived/` folder next to the input. Refuses RGB/RGBA image GeoTIFFs (e.g.
+  Viewer3D screenshot exports) since colours are not elevations. Use `--bbox`
+  and `--zone` for a survey area (UTM scale error grows past ~6 deg from the
+  zone's central meridian; the script warns). Handles the full 245 m GMRT
+  corridor grid in ~1 min / 2.4 GB RAM. `--help` for all options. Needs
+  numpy, scipy, tifffile.
+
 ## Suggested order, starting from scratch
 
 Most of these are independent, run-as-needed utilities, not a fixed
