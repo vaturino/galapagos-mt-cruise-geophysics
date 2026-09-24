@@ -132,7 +132,9 @@ const state = {
     pointB: null,
     pointCollection: null, // Cesium.PointPrimitiveCollection, the A/B endpoint markers
     lineEntity: null, // draped polyline entity following the sampled profile
-    profile: null, // { distKm: number[], depthM: (number|null)[], totalKm } or null before both points are picked
+    profile: null, // { distKm, lonDeg, latDeg, depthM, drapedCartesians, totalKm } -- geometry along A-B, or null before both points are picked
+    layerProfiles: [], // [{ id, label, kind, units, values: (number|null)[] }, ...] one per currently-visible dataset, same sample indexing as profile.distKm
+    layerCanvases: [], // [{ canvas, layerProfile }, ...] -- the currently-rendered per-layer plot canvases, for the composite PNG download
   },
   geoExport: {
     mode: "entire", // "entire" | "select"
@@ -615,8 +617,15 @@ function drawLegendCanvas(canvas, colorMeta) {
   for (let i = 0; i <= N; i++) {
     const t = i / N;
     const val = lo + t * (hi - lo);
+    // Structural check (ocean+land stop tables present) rather than a fixed
+    // domain-string allowlist: "absolute_m" (globe.cpt, fixed universal
+    // domain, background layers) and "absolute_m_survey" (build_cesium_mesh
+    // .py's --colormap relief, a dataset's own min/max, still a foreground
+    // layer -- see BASEMAP_DEPTH_BIAS_M above) both sample the same way for
+    // the legend; only isBasemapLayer's domain === "absolute_m" check above
+    // decides the background-layer depth sink, which relief must NOT trigger.
     const rgb =
-      colorMeta.ramp.domain === "absolute_m"
+      colorMeta.ramp.ocean && colorMeta.ramp.land
         ? sampleGlobeColorJS(val, colorMeta.ramp.ocean, colorMeta.ramp.land)
         : sampleRelativeColorJS(t, colorMeta.ramp.stops);
     grad.addColorStop(t, `rgb(${rgb[0] | 0},${rgb[1] | 0},${rgb[2] | 0})`);
@@ -883,14 +892,14 @@ function clearCrossSection() {
   cs.pointA = null;
   cs.pointB = null;
   cs.profile = null;
+  cs.layerProfiles = [];
+  cs.layerCanvases = [];
   if (cs.pointCollection) cs.pointCollection.removeAll();
   if (cs.lineCollection) cs.lineCollection.removeAll();
   if (cs.labelCollection) cs.labelCollection.removeAll();
   setCrossSectionStatus("");
-  const summaryEl = document.getElementById("crossSectionSummary");
-  if (summaryEl) summaryEl.textContent = "";
-  const canvas = document.getElementById("crossSectionCanvas");
-  if (canvas) canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+  const plotsEl = document.getElementById("crossSectionPlots");
+  if (plotsEl) plotsEl.innerHTML = "";
   setCrossSectionDownloadsEnabled(false);
   viewer.scene.requestRender();
 }
@@ -916,41 +925,76 @@ function triggerBrowserDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-// distance_km,lon_deg,lat_deg,depth_m -- one row per sample point, including
-// that sample's own lon/lat along the A-B geodesic (not just the two
-// endpoints, which are also recorded separately in the header comments for
-// convenience). depth_m is true depth (exaggeration already divided out); a
-// gap (nothing checked underneath that sample) leaves depth_m blank rather
+function csvSafe(s) {
+  return String(s).replace(/[,\n"]/g, " ").trim();
+}
+
+// distance_km,lon_deg,lat_deg,<layer 1>,<layer 2>,... -- one row per sample
+// point, including that sample's own lon/lat along the A-B geodesic (not
+// just the two endpoints, which are also recorded separately in the header
+// comments for convenience). One column per dataset that was checked at
+// compute time, each sampled independently via its own reconstructed grid
+// (see computeLayerProfiles) -- NOT the single topmost-surface reading the
+// old single-plot version used, so e.g. a bathymetry column and a
+// magnetic-anomaly column can both be populated for the same row. A gap
+// (that layer has no coverage at that sample) leaves the cell blank rather
 // than 0 or an interpolated guess, so it's visually obvious in a
 // spreadsheet/plot which stretches had no coverage -- lon_deg/lat_deg are
 // still filled in for a gap row, since the position along the line is known
-// even when the depth there isn't.
+// even when a given layer's value there isn't.
 function downloadCrossSectionCSV() {
   const cs = state.crossSection;
   const p = cs.profile;
-  if (!p || !cs.pointA || !cs.pointB) return;
+  const layers = cs.layerProfiles || [];
+  if (!p || !cs.pointA || !cs.pointB || layers.length === 0) return;
+  const header = [
+    "distance_km",
+    "lon_deg",
+    "lat_deg",
+    ...layers.map((lp) => csvSafe(`${lp.label} (${lp.units || lp.kind})`)),
+  ];
   const lines = [
-    "# Viewer3D cross-section profile",
+    "# Viewer3D cross-section profile -- one column per layer that was checked when this was computed",
     `# Point A: lon ${cs.pointA.lonDeg.toFixed(6)}, lat ${cs.pointA.latDeg.toFixed(6)}`,
     `# Point B: lon ${cs.pointB.lonDeg.toFixed(6)}, lat ${cs.pointB.latDeg.toFixed(6)}`,
     `# Total distance: ${p.totalKm.toFixed(3)} km`,
-    "# lon_deg/lat_deg are each sample's own position along the A-B line; depth_m is true depth (current vertical exaggeration already divided out); depth_m blank = no coverage at that sample",
-    "distance_km,lon_deg,lat_deg,depth_m",
+    "# lon_deg/lat_deg are each sample's own position along the A-B line; each layer column is that dataset's own value there (its native units, not exaggerated); blank = no coverage at that sample",
+    header.join(","),
   ];
   for (let i = 0; i < p.distKm.length; i++) {
-    const depth = p.depthM[i];
-    lines.push(
-      `${p.distKm[i].toFixed(4)},${p.lonDeg[i].toFixed(6)},${p.latDeg[i].toFixed(6)},${depth == null ? "" : depth.toFixed(2)}`
-    );
+    const row = [p.distKm[i].toFixed(4), p.lonDeg[i].toFixed(6), p.latDeg[i].toFixed(6)];
+    for (const lp of layers) {
+      const v = lp.values[i];
+      row.push(v == null ? "" : v.toFixed(4));
+    }
+    lines.push(row.join(","));
   }
   const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
   triggerBrowserDownload(blob, `viewer3d_cross_section_${Date.now()}.csv`);
 }
 
+// Stacks every currently-rendered per-layer canvas into one tall PNG (in
+// visible order, top to bottom) so "one button" still gives one file even
+// though the panel can now show several plots at once.
 function downloadCrossSectionPNG() {
-  const canvas = document.getElementById("crossSectionCanvas");
-  if (!canvas || !state.crossSection.profile) return;
-  canvas.toBlob((blob) => {
+  const cs = state.crossSection;
+  const canvases = (cs.layerCanvases || []).map((lc) => lc.canvas);
+  if (!cs.profile || canvases.length === 0) return;
+  const gap = 6;
+  const w = Math.max(...canvases.map((c) => c.width));
+  const h = canvases.reduce((sum, c) => sum + c.height, 0) + gap * Math.max(0, canvases.length - 1);
+  const composite = document.createElement("canvas");
+  composite.width = w;
+  composite.height = h;
+  const ctx = composite.getContext("2d");
+  ctx.fillStyle = "#10161f";
+  ctx.fillRect(0, 0, w, h);
+  let y = 0;
+  for (const c of canvases) {
+    ctx.drawImage(c, 0, y);
+    y += c.height + gap;
+  }
+  composite.toBlob((blob) => {
     if (blob) triggerBrowserDownload(blob, `viewer3d_cross_section_${Date.now()}.png`);
   }, "image/png");
 }
@@ -1048,48 +1092,56 @@ function sampleCrossSectionProfile(pointA, pointB) {
   return { distKm, lonDeg, latDeg, depthM, drapedCartesians, totalKm: totalM / 1000 };
 }
 
-function drawCrossSectionCanvas(canvas, profile) {
+// Draws ONE layer's profile into its own small canvas: geometryProfile is
+// the shared A-B sampling (distance/lon/lat, same for every layer);
+// layerProfile is that one dataset's own values at those same sample
+// indices (see computeLayerProfiles). Kept deliberately self-contained
+// (title + endpoint coords baked into the picture) so each canvas -- and the
+// stacked composite downloadCrossSectionPNG() builds from them -- reads on
+// its own without the on-page status text alongside it.
+function drawLayerCrossSectionCanvas(canvas, geometryProfile, layerProfile) {
   const ctx = canvas.getContext("2d");
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
 
-  const validDepths = profile.depthM.filter((v) => v != null);
-  if (validDepths.length < 2) {
+  ctx.fillStyle = "#c7d0da";
+  ctx.font = "bold 9px -apple-system, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(layerProfile.label, 4, 10);
+
+  const validVals = layerProfile.values.filter((v) => v != null);
+  if (validVals.length < 2) {
     ctx.fillStyle = "#7f8b97";
-    ctx.font = "11px -apple-system, sans-serif";
-    ctx.fillText("No coverage along this line.", 8, h / 2);
+    ctx.font = "10px -apple-system, sans-serif";
+    ctx.fillText("No coverage along this line.", 8, h / 2 + 8);
     return;
   }
 
-  const padL = 42, padR = 8, padT = 22, padB = 16;
+  const padL = 42, padR = 8, padT = 18, padB = 16;
   const plotW = w - padL - padR;
   const plotH = h - padT - padB;
-  const dMin = Math.min(...validDepths);
-  const dMax = Math.max(...validDepths);
-  const dRange = Math.max(1e-6, dMax - dMin);
-  const totalKm = Math.max(1e-9, profile.totalKm);
+  const vMin = Math.min(...validVals);
+  const vMax = Math.max(...validVals);
+  const vRange = Math.max(1e-6, vMax - vMin);
+  const totalKm = Math.max(1e-9, geometryProfile.totalKm);
 
   const xAt = (km) => padL + (km / totalKm) * plotW;
-  const yAt = (depth) => padT + (1 - (depth - dMin) / dRange) * plotH;
+  const yAt = (v) => padT + (1 - (v - vMin) / vRange) * plotH;
 
-  // Coordinate header -- lon/lat of the two picked endpoints, drawn right
-  // into the chart so a downloaded PNG is self-contained (doesn't need the
-  // CSV or the on-page status text alongside it to know where the profile
-  // was taken).
+  // Coordinate header -- lon/lat of the two picked endpoints.
   const cs = state.crossSection;
   if (cs.pointA && cs.pointB) {
     ctx.fillStyle = "#b9c2cc";
     ctx.font = "8px -apple-system, sans-serif";
-    ctx.textAlign = "left";
-    ctx.fillText(`A ${cs.pointA.lonDeg.toFixed(3)}, ${cs.pointA.latDeg.toFixed(3)}`, padL, 10);
     ctx.textAlign = "right";
-    ctx.fillText(`B ${cs.pointB.lonDeg.toFixed(3)}, ${cs.pointB.latDeg.toFixed(3)}`, w - padR, 10);
+    ctx.fillText(`A ${cs.pointA.lonDeg.toFixed(2)},${cs.pointA.latDeg.toFixed(2)} -> B ${cs.pointB.lonDeg.toFixed(2)},${cs.pointB.latDeg.toFixed(2)}`, w - padR, 10);
     ctx.textAlign = "left";
   }
 
-  // sea-level gridline, only if the profile actually straddles it
-  if (dMin < 0 && dMax > 0) {
+  // zero gridline, only if the profile actually straddles it (depth/anomaly
+  // fields alike -- meaningful for both)
+  if (vMin < 0 && vMax > 0) {
     ctx.strokeStyle = "#2b3742";
     ctx.lineWidth = 1;
     const y0 = Math.round(yAt(0)) + 0.5;
@@ -1103,14 +1155,14 @@ function drawCrossSectionCanvas(canvas, profile) {
   ctx.lineWidth = 1.6;
   ctx.beginPath();
   let drawing = false;
-  for (let i = 0; i < profile.distKm.length; i++) {
-    const depth = profile.depthM[i];
-    if (depth == null) {
+  for (let i = 0; i < geometryProfile.distKm.length; i++) {
+    const v = layerProfile.values[i];
+    if (v == null) {
       drawing = false;
       continue;
     }
-    const x = xAt(profile.distKm[i]);
-    const y = yAt(depth);
+    const x = xAt(geometryProfile.distKm[i]);
+    const y = yAt(v);
     if (!drawing) {
       ctx.moveTo(x, y);
       drawing = true;
@@ -1120,15 +1172,85 @@ function drawCrossSectionCanvas(canvas, profile) {
   }
   ctx.stroke();
 
+  const units = layerProfile.units ? ` ${layerProfile.units}` : "";
   ctx.fillStyle = "#7f8b97";
   ctx.font = "10px -apple-system, sans-serif";
   ctx.textAlign = "left";
-  ctx.fillText(`${dMax.toFixed(0)} m`, 2, padT + 8);
-  ctx.fillText(`${dMin.toFixed(0)} m`, 2, h - padB + 4);
+  ctx.fillText(`${vMax.toFixed(vMax >= 1000 || vMax <= -1000 ? 0 : 1)}${units}`, 2, padT + 8);
+  ctx.fillText(`${vMin.toFixed(vMin >= 1000 || vMin <= -1000 ? 0 : 1)}${units}`, 2, h - padB + 4);
   ctx.fillText("A", padL, h - 3);
   ctx.textAlign = "right";
   ctx.fillText("B", w - padR, h - 3);
   ctx.textAlign = "left";
+}
+
+// Samples every currently checked+loaded dataset's OWN value grid at the
+// shared set of A-B sample points, via the exact same nearest-cell lookup
+// exportGeoTiff() already uses to composite multiple dataset rasters --
+// this is what makes "one plot per visible layer" possible at all.
+// viewer.scene.sampleHeight (used only for the 3D draped guide-line below)
+// can ever return just the topmost rendered surface at a point, so it could
+// never tell an overlapping bathymetry depth and magnetic-anomaly value
+// apart; reading each dataset's own reconstructed grid directly sidesteps
+// that entirely, and is exact (not interpolated), same as
+// buildDatasetElevationRaster/buildDatasetValueRaster already are.
+function computeLayerProfiles(lonDeg, latDeg) {
+  const layers = [];
+  for (const id of state.order) {
+    const d = state.datasets[id];
+    if (!d.loaded || !d.visible || !d.sections || !d.meta) continue;
+    const raster = buildDatasetValueRaster(d);
+    const meta = d.meta;
+    const isGeo = !!meta.is_geophysics;
+    const label = meta.label || d.manifestEntry.label;
+    const kind = isGeo ? meta.legend_kind : elevWord(meta.z_range_m);
+    const units = (isGeo ? meta.legend_units || "" : "m").trim();
+    const values = new Array(lonDeg.length);
+    for (let i = 0; i < lonDeg.length; i++) {
+      const col = Math.round((lonDeg[i] - raster.west) / raster.dlon);
+      const row = Math.round((raster.north - latDeg[i]) / raster.dlat);
+      if (col < 0 || col >= raster.nCols || row < 0 || row >= raster.nRows) {
+        values[i] = null;
+        continue;
+      }
+      const v = raster.val[row * raster.nCols + col];
+      values[i] = Number.isFinite(v) ? v : null;
+    }
+    layers.push({ id, label, kind, units, values });
+  }
+  return layers;
+}
+
+// Rebuilds the #crossSectionPlots panel from scratch: one small canvas per
+// currently-visible layer, stacked top to bottom in dataset order. Called
+// every time the profile is (re)computed, including on a visibility toggle
+// (see updateCrossSection) so the set of plots always matches what's
+// actually checked right now.
+function renderCrossSectionPlots(geometryProfile, layerProfiles) {
+  const cs = state.crossSection;
+  const container = document.getElementById("crossSectionPlots");
+  if (!container) return;
+  container.innerHTML = "";
+  cs.layerCanvases = [];
+  if (layerProfiles.length === 0) {
+    const hint = document.createElement("div");
+    hint.className = "hint-text";
+    hint.textContent = "No datasets checked -- check a dataset above to see its profile here.";
+    container.appendChild(hint);
+    return;
+  }
+  for (const lp of layerProfiles) {
+    const wrap = document.createElement("div");
+    wrap.className = "cross-section-plot";
+    const canvas = document.createElement("canvas");
+    canvas.width = 232;
+    canvas.height = 108;
+    canvas.className = "cross-section-canvas";
+    wrap.appendChild(canvas);
+    container.appendChild(wrap);
+    drawLayerCrossSectionCanvas(canvas, geometryProfile, lp);
+    cs.layerCanvases.push({ canvas, layerProfile: lp });
+  }
 }
 
 function computeAndRenderCrossSection() {
@@ -1140,6 +1262,7 @@ function computeAndRenderCrossSection() {
   }
   const profile = sampleCrossSectionProfile(cs.pointA, cs.pointB);
   cs.profile = profile;
+  cs.layerProfiles = computeLayerProfiles(profile.lonDeg, profile.latDeg);
 
   cs.lineCollection.removeAll();
   let seg = [];
@@ -1159,19 +1282,15 @@ function computeAndRenderCrossSection() {
   }
   flushSeg();
 
-  const validDepths = profile.depthM.filter((v) => v != null);
-  const validCount = validDepths.length;
+  const layerCount = cs.layerProfiles.length;
+  const anyCoverage = cs.layerProfiles.some((lp) => lp.values.some((v) => v != null));
   setCrossSectionStatus(
-    `Cross-section: ${profile.totalKm.toFixed(2)} km, ${validCount}/${profile.distKm.length} sample points with coverage. Click "Pick 2 points" to redo.`
+    layerCount === 0
+      ? `Cross-section: ${profile.totalKm.toFixed(2)} km. No datasets checked -- check one above to plot it. Click "Pick 2 points" to redo.`
+      : `Cross-section: ${profile.totalKm.toFixed(2)} km across ${layerCount} checked layer${layerCount === 1 ? "" : "s"}, one plot each below. Click "Pick 2 points" to redo.`
   );
-  const summaryEl = document.getElementById("crossSectionSummary");
-  if (summaryEl) {
-    summaryEl.textContent = validCount > 0
-      ? `Depth range along profile: ${Math.min(...validDepths).toFixed(0)} to ${Math.max(...validDepths).toFixed(0)} m (true depth, exaggeration divided out).`
-      : "No checked dataset covers this line -- check a dataset underneath it.";
-  }
-  drawCrossSectionCanvas(document.getElementById("crossSectionCanvas"), profile);
-  setCrossSectionDownloadsEnabled(validCount > 0);
+  renderCrossSectionPlots(profile, cs.layerProfiles);
+  setCrossSectionDownloadsEnabled(anyCoverage);
   viewer.scene.requestRender();
 }
 
@@ -1469,6 +1588,46 @@ function buildDatasetElevationRaster(d) {
     elev[row * nCols + col] = zM[i];
   }
   const result = { west, north, dlon, dlat, nCols, nRows, elev };
+  d.rasterCache[key] = result;
+  return result;
+}
+
+// Same un-flatten again, but for the cross-section tool: writes each
+// vertex's own geophysics VALUE (nT, mGal, km, degC -- whatever the layer's
+// "value" mesh.bin section holds, see build_geophysics_drape.py) for a
+// geophysics dataset, or its z_m (true depth/elevation, never exaggerated)
+// for a bathymetry-type dataset that has no separate "value" section --
+// z_m already *is* the plottable quantity there. Either way this is the
+// dataset's own real number, not its baked-in display colour, so
+// computeLayerProfiles() can chart it directly.
+function buildDatasetValueRaster(d) {
+  const key = "value";
+  d.rasterCache = d.rasterCache || {};
+  if (d.rasterCache[key]) return d.rasterCache[key];
+
+  const meta = d.meta;
+  const west = meta.bbox.lon_min;
+  const north = meta.bbox.lat_max;
+  const dlon = meta.dlon_deg;
+  const dlat = meta.dlat_deg;
+  const nCols = Math.max(1, Math.round((meta.bbox.lon_max - meta.bbox.lon_min) / dlon) + 1);
+  const nRows = Math.max(1, Math.round((meta.bbox.lat_max - meta.bbox.lat_min) / dlat) + 1);
+  const val = new Float32Array(nRows * nCols).fill(NaN); // NaN everywhere = nodata
+
+  const lonRad = d.sections.lon_rad;
+  const latRad = d.sections.lat_rad;
+  const srcArr = d.sections.value || d.sections.z_m;
+  const n = meta.vertex_count;
+  const RAD2DEG = 180 / Math.PI;
+  for (let i = 0; i < n; i++) {
+    const lonDeg = lonRad[i] * RAD2DEG;
+    const latDeg = latRad[i] * RAD2DEG;
+    const col = Math.round((lonDeg - west) / dlon);
+    const row = Math.round((north - latDeg) / dlat);
+    if (col < 0 || col >= nCols || row < 0 || row >= nRows) continue;
+    val[row * nCols + col] = srcArr[i];
+  }
+  const result = { west, north, dlon, dlat, nCols, nRows, val };
   d.rasterCache[key] = result;
   return result;
 }

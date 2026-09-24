@@ -151,11 +151,14 @@ def main():
     r0, r1, c0, c1 = tight_bbox(z)
     populated, vmin_raw, vmax_raw = scan_populated(z, r0, r1, c0, c1)
     dx_deg = abs(x[1] - x[0])
+    dy_deg = abs(y[1] - y[0])
     log(f"  {len(x)}x{len(y)} grid, {populated:,} populated cells, value range [{vmin_raw:.2f}, {vmax_raw:.2f}]")
     nc.close()
 
     stride = args.stride or choose_stride(populated, args.max_triangles)
     eff_res_m = dx_deg * stride * 111320
+    dlon_deg = dx_deg * stride
+    dlat_deg = dy_deg * stride
     log(f"  stride={stride} -> effective resolution ~{eff_res_m:.0f} m (native was ~{dx_deg*111320:.0f} m)")
 
     log("decimating + triangulating geophysics grid's own footprint")
@@ -225,6 +228,10 @@ def main():
         write_section(f, "z_m", terrain_z.astype(np.float32))
         write_section(f, "normal", normals.astype(np.float32))
         write_section(f, "color_depth", color_value.astype(np.uint8))
+        # raw geophysics value per vertex (nT, mGal, km, ...) -- NOT baked
+        # into color_depth's RGBA, so the client can recover the actual
+        # number for e.g. cross-section profiles rather than only a color.
+        write_section(f, "value", value_v.astype(np.float32))
         write_section(f, "indices", tris.astype(np.uint32))
 
     meta = {
@@ -237,6 +244,8 @@ def main():
         "stride": stride,
         "effective_resolution_m": eff_res_m,
         "native_resolution_m": dx_deg * 111320,
+        "dlon_deg": dlon_deg,
+        "dlat_deg": dlat_deg,
         "rtc_center_ecef": ecef.mean(axis=0).tolist(),
         "bbox": {
             "lon_min": math.degrees(float(lon_v.min())),

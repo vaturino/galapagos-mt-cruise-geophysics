@@ -280,9 +280,15 @@ input[type="range"] {
   margin-top: 8px;
 }
 
+.cross-section-plots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .cross-section-canvas {
   display: block;
-  margin-top: 8px;
   background: #10161f;
   border: 1px solid #2b3742;
   border-radius: 5px;

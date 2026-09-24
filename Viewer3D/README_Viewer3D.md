@@ -77,13 +77,16 @@ Stop it with Ctrl+C in the terminal it's running in.
   currently checked.
 - **Click the surface** to read off longitude/latitude and approximate depth
   (divided back out of the current exaggeration) at that point.
-- **Cross-section (two-point depth profile)** -- click "Pick 2 points", then
-  click twice anywhere on the rendered surface; a persistent yellow marker is
+- **Cross-section (multi-layer profile)** -- click "Pick 2 points", then click
+  twice anywhere on the rendered surface; a persistent yellow marker is
   dropped at each click (labelled A/B, draped along the line between them)
-  and a depth-vs-distance chart appears below the buttons, with "Download
-  CSV"/"Download PNG" buttons underneath it once a profile is computed. See
-  "Cross-section tool" below for how it's computed, why it takes a few
-  seconds, what the downloads contain, and its limitations.
+  and a small chart appears below the buttons **for every currently-checked
+  dataset** -- e.g. picking a line that crosses both `GMRT_basemap` and
+  `Geophys_Mittelstaedt_MagAnomaly` gives you a depth-vs-distance chart AND a
+  magnetic-anomaly-vs-distance chart, stacked, both along the same line --
+  with "Download CSV"/"Download PNG" buttons underneath once at least one
+  layer has coverage. See "Cross-section tool" below for how it's computed,
+  why it takes a moment, what the downloads contain, and its limitations.
 - **Track points (CSV upload)** -- upload a CSV of lat/lon points (optional
   name/label column; the parser looks for header names containing "lat"/
   "lon"/"name" etc., and falls back to assuming columns 1/2 are lat/lon if it
@@ -118,16 +121,67 @@ Stop it with Ctrl+C in the terminal it's running in.
 
 `GMRT_basemap` is the default-visible dataset when the viewer opens -- a
 coarse regional context layer, colored with a different colormap (see
-below) specifically so it reads as a base, not another survey. The other
-four are detailed single-survey meshes you check on as needed, on top of it.
+below) specifically so it reads as a base, not another survey. The rest are
+detailed single-survey/compilation meshes you check on as needed, on top of it.
 
 | id | source | coverage | native resolution | shown at (this build) | backscatter? |
 |---|---|---|---|---|---|
 | `GMRT_basemap` | `GMRT_regional/GMRT_Basemap/GMRT_corridor_basemap_clean.grd` (GMRT GridServer, `layer=topo`, `resolution=max`, spike-repaired -- see "Known data-quality issues" below) | Wider Panama-Galapagos-Costa Rica-N.Peru region, matched to cover the full area of interest (98.5-73.5W/4.5S-10.7N) | ~245 m (GMRT's own ceiling for this bbox under its 2GB file cap) | ~978 m (stride 4) | no |
+| `DOA_ETP_MBES_corridor` | `DOA_ETP_MBES/DOA_ETP_MBES_galapagos_corridor_4326_clean.tif` (Deep Ocean Alliance / Charles Darwin Foundation regional MBES compilation, cropped + reprojected -- see "Reading other formats" below) | Same corridor as `GMRT_basemap`, clipped to the source's own coverage (~95.3-77.0W/4.5S-10.7N) | 100 m (**real multibeam**, not satellite-derived -- resolution-priority stacked from 6 survey sources) | ~400 m (stride 4) | no |
 | `MV1007` | `GeoMapApp_ready/MV1007_*.grd` | MV1007 survey corridor (~530x370 km) | ~50 m | **~50 m -- native, stride 1** | yes |
 | `GSC_regional` | `GMRT_regional/.../GSC_97-86W_Compilation/GSC_97-86W_100m_comp.grd` | Galapagos Spreading Center, 97-86 W regional compilation | ~100 m | **~100 m -- native, stride 1** | no |
 | `DRFT04RR` | `GMRT_regional/.../DRFT04RR_GSC_Bathymetry/galapagos.100m.comb_geomapapp.grd` | DRFT04RR Galapagos platform survey | ~100 m | **~100 m -- native, stride 1** | no |
 | `TN188` | `GMRT_regional/.../TN188_GSC_Bathymetry_8m/` (26 DSL-120A line grids) | TN188 Galapagos Spreading Center survey lines | ~7 m (measured from the grid spacing itself -- the "8 m" in the dataset name is the survey's own nominal/rounded product label) | **~7 m -- native, stride 1** | no |
+| `Mittelstaedt_Galapagos_Bathy` | `FOR_TUSHAR/CUT_bath_clean.tif` (Mittelstaedt-group Galapagos platform compilation, provided directly rather than pulled from MGDS; spike-repaired -- see "Known data-quality issues" below; original `CUT_bath.grd` is GMT NetCDF4/HDF5, not the classic NetCDF3 every other dataset above uses -- see "Reading other formats" below) | Galapagos platform, tightly cropped around the islands (93.5-89.9W/0.5S-2.0N) | ~50 m | ~100 m (stride 2 -- native risked this machine's ~3.8 GB ceiling, same trade-off as `MV1007`/`GSC_regional`/`TN188` originally hit) | no |
+
+`Mittelstaedt_Galapagos_Bathy` is the one survey mesh built with `--colormap
+relief` rather than the default `depth`: unlike every other survey layer
+here, its own footprint includes real islands rising well above sea level
+(Wolf Volcano on Isabela reaches a genuine 1674 m in this data), so `depth`'s
+linear rescale-to-own-min/max would stretch across land elevation and ocean
+depth in one ramp -- crushing the ocean floor (the great majority of this
+layer's area) into a narrow, nearly-uninterrupted dark band near one end of
+the scale, and mapping the *shallowest water* to the same near-white colour
+as `depth` normally reserves for a survey's *shallowest depth*, which reads
+as backwards for anything with real land in it. The first build used
+`--colormap globe` to fix this (same fixed-domain palette `GMRT_basemap`
+uses) -- which fixed the contrast problem but introduced two new ones: it
+made this layer visually indistinguishable from `GMRT_basemap` when both are
+checked on (Val: "now it's the same color as the base map"), and, less
+obviously, `app.js` treats *any* `--colormap globe` dataset as a background
+context layer (`isBasemapLayer`, see "Basemap vs. survey colouring" below)
+and sinks its rendered depth by a fixed 120 m -- fine for an actual basemap,
+wrong for a detailed foreground survey, and risked new z-fighting between
+the two background-flagged layers where they overlap. `--colormap relief`
+(new this round) keeps the fix -- ocean and land are still rescaled and
+coloured independently, hinged at sea level, so ocean-depth contrast never
+gets crushed by land -- but scales each side to *this dataset's own*
+min/max rather than borrowing `globe.cpt`'s fixed -10000..+10000 m domain,
+uses a distinct warm rust-to-gold land palette (`globe`'s land side is
+green-to-tan-to-grey), and is tagged with a different `meta.json` domain
+string (`"absolute_m_survey"`, not `"absolute_m"`) specifically so it does
+NOT trip the background-layer flag -- it stays a normal foreground survey
+mesh, visually distinct from `GMRT_basemap` at a glance, with full ocean and
+land relief detail.
+
+`DOA_ETP_MBES_corridor` is a genuinely different kind of layer from
+`GMRT_basemap`, even though both are wide-corridor context meshes: GMRT's
+regional grid is largely satellite-altimetry-derived away from GMRT's own
+sourced surveys, while this one is a mosaic of real shipborne multibeam
+(MBES) coverage from six sources, stacked resolution-priority (real survey
+data wins over lower-resolution fill wherever it exists). Coverage is
+**partial by design** -- only ~32% of cells in its bbox are populated,
+because it only shows where MBES ships have actually surveyed; the rest is
+transparent/absent rather than filled in, unlike `GMRT_basemap`'s full
+synthesis. Its own metadata CSV/spreadsheet (see "Reading other formats"
+below) is the reference for exactly which cruises cover which areas. It's
+shown at 4x native (~400 m, same decimation factor as `GMRT_basemap`) for
+the same reason -- `--stride 2` (28.7M triangles across this whole corridor)
+OOM-killed on this machine even with the memory-streaming fixes from the
+native-resolution work (see "Native vs. shown resolution" below); `--stride
+1` would be far worse. Native-resolution detail is still there in the
+source file if you ever need to crop a smaller sub-area and rebuild it at
+full native, the same way `GMRT_basemap` is not the tool for that either.
 
 Every dataset's row in the Datasets panel shows both numbers too (e.g.
 "~100 m shown (native ~50 m)", or "~100 m resolution (native)" once shown
@@ -233,6 +287,19 @@ fields when present, falling back to the original depth-in-metres behaviour
 for every dataset that doesn't set them (i.e. every dataset built with
 `build_cesium_mesh.py`, unchanged).
 
+A third small, additive change was needed for the cross-section tool (see
+"Cross-section tool" below) to plot a geophysics layer at all: `mesh.bin`
+now also carries a raw `value` section (the geophysics quantity itself --
+nT/mGal/km/degC -- as float32, one per vertex, never baked into a colour),
+and `meta.json` carries `dlon_deg`/`dlat_deg` (the vertex grid's own
+lon/lat spacing after decimation) alongside the existing `bbox`. Together
+these let the client reconstruct an exact `(lon,lat) -> value` grid for a
+geophysics layer the same way it already did for a bathymetry layer's
+`z_m`, purely additive -- every other consumer of `mesh.bin`/`meta.json`
+ignores the new fields. All twelve geophysics layers (the eight above plus
+the four `Geophys_Mittelstaedt_*` layers below) were rebuilt once to pick
+these up; nothing about their triangulation, draping, or colouring changed.
+
 **Terrain-drape limitation:** several of these grids extend outside
 `GMRT_basemap`'s own bbox (e.g. Bassett's residual-gravity grid runs to
 111W, the SR1806 grids to 105W, both well past the basemap's 98.5W edge;
@@ -262,6 +329,36 @@ python3 build_geophysics_drape.py \
 then add a manifest entry with `"category": "geophysics"` (see "Adding
 another dataset" below for the manifest schema).
 
+**Four more layers, draped on a different terrain reference.** `FOR_TUSHAR/`
+holds a second, unrelated geophysics compilation -- the Mittelstaedt group's
+own Galapagos-platform grids (gravity, magnetics, magnetization; provided
+directly, not pulled from MGDS). These drape onto `Mittelstaedt_Galapagos_Bathy`
+(`FOR_TUSHAR/CUT_bath.grd`) rather than `GMRT_basemap`, since it's the far
+higher-resolution (50 m vs. ~245 m) and better-matched terrain for this one
+corner of the corridor -- and, being ~50 m native over a tight island-scale
+bbox, `terrain_clamped_frac` for all four is ~0.5-0.8% (negligible; every
+`FOR_TUSHAR/` grid shares essentially the same footprint by construction --
+see "Reading other formats" below for the GMT NetCDF4/HDF5 format these ship
+in, distinct from the GMRT_regional ones above).
+
+| id | source grid | legend units | ramp |
+|---|---|---|---|
+| `Geophys_Mittelstaedt_FreeAir` | `FOR_TUSHAR/CUT_FA.grd` | mGal | diverging |
+| `Geophys_Mittelstaedt_MagAnomaly` | `FOR_TUSHAR/CUT_maganom_1km_blockmed.grd` | nT | diverging |
+| `Geophys_Mittelstaedt_Magnetization` | `FOR_TUSHAR/CUT_magnetization.grd` | A/m | diverging |
+| `Geophys_Mittelstaedt_RMBA` | `FOR_TUSHAR/CUT_RMBA.grd` | mGal | diverging |
+
+`Geophys_Mittelstaedt_MagAnomaly` looks visibly different from the other
+three: it's raw 1 km block-median magnetic data -- real point measurements
+along old ship tracks, only ~9% populated within its own bbox -- not an
+interpolated/inverted continuous field like FreeAir/Magnetization/RMBA (each
+100% populated, i.e. a model output, not raw track data). Expect a sparse
+scatter of small triangles tracing old survey lines rather than a continuous
+colored surface; that's the honest shape of the underlying data (gaps between
+tracks the ship never covered), not a build problem, and matches the same
+"gaps are real, not filled in" principle `DOA_ETP_MBES_corridor` follows
+above.
+
 ## Known data-quality issues
 
 **Wolf/Darwin Island bad-data spikes (fixed).** GMRT's own synthesis for
@@ -290,6 +387,38 @@ close to the 253 m documented peak); Darwin's maxes at 142 m (this coarse
 ~245 m grid was never going to resolve a ~1 km-wide island precisely even
 before the bug -- a low, smoothed rise is the honest answer here, not a
 false 165 m summit).
+
+**Wolf Island / Darwin Island bad-data spikes, again -- a second, independent
+occurrence (fixed).** `FOR_TUSHAR/CUT_bath.grd` (the Mittelstaedt-group
+Galapagos platform compilation, a completely different dataset/provenance
+from GMRT's synthesis above -- from Maddie Young's MS thesis processing
+chain, not GMRT's GridServer) turned out to have the *same two islands*
+spiked, independently: Darwin Island (documented peak 165 m) reached 6874 m,
+and Wolf Island -- a small island near Darwin, **not** the ~1707 m Wolf
+*Volcano* on Isabela, easy to conflate by name -- reached 1904.9 m against
+its documented 253 m peak. Found by scanning the full grid for cells above
+the highest real Galapagos peak (Wolf Volcano, ~1707 m): every cell above
+2000 m was confined to one tight cluster exactly at Darwin Island's
+location; patching that alone left a new max of 1904.9 m sitting exactly at
+Wolf Island's location, which was the tell that a second, smaller spike was
+still there. `scripts/fix_mittelstaedt_bath_spikes.py` applies the same
+mask-dilate-fill-holes-then-Laplacian-inpaint method as `fix_gmrt_spikes.py`
+(same per-island height caps: Wolf Island 300 m, Darwin 250 m), scoped
+tightly to each island's own small footprint. A single *global* cutoff is
+safe here specifically because `CUT_bath.grd`'s bbox is the Galapagos
+platform only (93.5-89.9W/0.5S-2.0N) -- no mainland/Andes terrain the way
+the wider GMRT corridor has, which is what ruled out a global cutoff there.
+Result: Wolf Island's patch now maxes at 254.5 m, Darwin's at 117.7 m (both
+plausible, unresolved-at-this-resolution answers, not false summits -- same
+reasoning as the GMRT fix), and the corrected grid's true maximum anywhere
+is 1674.4 m, landing almost exactly on Wolf *Volcano*'s real, un-spiked
+1707 m documented peak. Writes `CUT_bath_clean.tif` (GeoTIFF -- this project
+can only *read* NetCDF4/HDF5, not write it, so the corrected grid isn't
+another `.grd`; see "Reading other formats" below) alongside the untouched
+original `CUT_bath.grd`. `Mittelstaedt_Galapagos_Bathy` and all four
+`Geophys_Mittelstaedt_*` drapes (their terrain-elevation lookup, not their
+coloured VALUE, would otherwise have sampled the spike) are built from the
+clean file.
 
 **A broader area of likely bad data exists in the mainland corridor,
 unfixed.** While investigating the above, a wider scan (comparing each
@@ -377,9 +506,138 @@ past what stays smooth in a browser tab on a laptop GPU. The viewer already
 treats survey layers as check-on-as-needed rather than always-on for this
 reason (see "Available datasets" above) -- if the viewer gets sluggish with
 several native layers on at once during the cruise, toggle down to one or
-two rather than rebuilding at a coarser stride; `--stride 2` versions of the
-old (still-correct) meshes are kept in `Viewer3D/data_backup_20260921/` if
-you ever want to compare or revert one dataset.
+two rather than rebuilding at a coarser stride. (The pre-fix stride-2
+backups of these meshes were kept briefly after this round of work, then
+deleted once the native rebuilds were validated -- there's no backup copy
+to fall back to now; rebuild at a coarser `--stride` from the source `.grd`
+if that's ever needed instead.)
+
+## Reading other formats
+
+`build_cesium_mesh.py` reads NetCDF (`.grd`/`.nc`, `x/y/z` or
+`lon/lat/altitude`) and now **GeoTIFF** (`.tif`/`.tiff`) natively --
+`read_grd()` dispatches on file extension, and everything downstream
+(decimation, normals, colour ramps, `mesh.bin` writing) is unchanged either
+way. `DOA_ETP_MBES_corridor` above is the first dataset built from the
+GeoTIFF path. Requirements and limits:
+
+- **CRS must already be EPSG:4326 (plain lon/lat degrees)** -- the script
+  refuses anything else rather than silently misplacing data. Most survey
+  GeoTIFFs are *not* in this CRS (the DOA-ETP compilation, for instance,
+  ships in EPSG:3395 World Mercator); reproject first. `scripts/
+  crop_reproject_doa_etp.py` is a worked example: it crops to a lon/lat
+  bounding box and reprojects via a `WarpedVRT` read out in row-blocks
+  (never materialising the full array), which is the pattern to copy for
+  the next GeoTIFF -- change `SRC`/`DST`/the bounding box and it's a
+  general crop+reproject tool, not something specific to this one file.
+  **Gotcha hit and fixed while building this**: clamp the requested crop
+  bounds to the source's own actual bounds *before* computing the pixel
+  window -- an unclamped window can silently extend past the raster's edge
+  (GDAL doesn't error on this), corrupting a thin strip at the crop edges
+  with whatever it fills for an out-of-range read. Caught by re-reading a
+  chunk fresh from the VRT and comparing it against what ended up in the
+  written file, not by any error message.
+- **Nodata is translated to NaN on read**, since the rest of the pipeline
+  tests coverage with `np.isfinite()` and GeoTIFF nodata is usually a large
+  *finite* sentinel (e.g. `3.4e38`), not NaN.
+- **`--backscatter` as a GeoTIFF isn't supported yet** -- that matching step
+  does scattered-point indexing (`sz[row_array, col_array]`), which the
+  GeoTIFF row-reader adapter doesn't implement (only the contiguous-window
+  reads bathymetry decimation needs). Convert a backscatter GeoTIFF to
+  NetCDF first, or extend the adapter with `rasterio`'s `dataset.sample()`
+  if this comes up.
+- Needs `rasterio` and `pyproj` installed -- **not preinstalled**, see
+  "Setup: what needs installing before the cruise" below.
+
+**GMT's *other* native `.grd` variant -- NetCDF4-on-HDF5 -- is also read
+natively now**, and it is easy to mix up with the classic NetCDF3 `.grd`
+every dataset above this round used: same `.grd` extension, genuinely
+different file format underneath (GMT>=6 writes NetCDF4/HDF5 by default,
+older GMT and most of this project's existing files are NetCDF3). All five
+`FOR_TUSHAR/` grids turned out to be this format -- `scipy.io.netcdf_file`/
+`netcdf_lite.py` (the classic-NetCDF3 reader) can't open it at all and just
+raises "not a valid NetCDF 3 file". `read_grd()` now tells the two apart by
+sniffing the file's own magic bytes (HDF5's signature) rather than trusting
+the extension, and routes an HDF5 `.grd` through the same `rasterio`-backed
+adapter as GeoTIFF -- no separate dependency, no CRS check needed (unlike
+GeoTIFF, these never carry an embedded CRS; x/y are geographic degrees by
+the same convention the NetCDF3 path already assumes). `Mittelstaedt_Galapagos_Bathy`
+and the four `Geophys_Mittelstaedt_*` layers above are the first datasets
+built from it.
+
+One real capability gap this exposed and fixed: `build_geophysics_drape.py`'s
+terrain-elevation lookup does *scattered* point indexing (`z[row_idx,
+col_idx]`, arbitrary (row, col) pairs, not a contiguous window) to find each
+drape vertex's display elevation -- and until now that only ever ran against
+a classic-NetCDF3 terrain grid (`GMRT_corridor_basemap.grd`), so the
+GeoTIFF/HDF5 row-reader adapter never needed to support it (same reason
+`--backscatter` as a GeoTIFF is still refused above). Draping the four
+`Geophys_Mittelstaedt_*` layers onto `CUT_bath.grd` needed exactly that
+against an HDF5 grid, so the adapter now supports it: it materialises the
+whole terrain band into memory once (capped at ~1.5 GB; `CUT_bath.grd` itself
+is ~356 MB as float64), then indexes it like a normal numpy array. Fine for a
+single terrain reference grid at this scale -- not a general scattered-read
+primitive, and it will refuse rather than silently blow memory on something
+much bigger.
+
+Two more format tools, for the seismic/gravity/magnetics data that mostly
+shows up as raw survey products rather than ready-made grids:
+
+- **`scripts/segy_inspect.py`** -- reads a SEGY seismic file's headers
+  (trace count, sample rate, record length, shot-point coordinate range from
+  the trace headers) without loading trace data, and can export the
+  shot-point track as a CSV. SEGY is fundamentally *not* a grid -- it's
+  traces along a survey track -- so it can never become a bathymetry mesh
+  the way `.grd`/`.tif` do; this is a cataloging/orientation tool ("what's
+  in this file, roughly where was it shot"), not a viewer-ready converter.
+  Needs `segyio` (see setup below). Trace-header coordinates are frequently
+  in projected meters, not lon/lat -- the script flags this rather than
+  guessing; check the file's own textual header or documentation.
+- **`scripts/ascii_xyz_to_grd.py`** -- converts a plain ASCII lon/lat/value
+  text file (whitespace or comma delimited, `.txt` or `.txt.gz`) either to
+  a NetCDF `.grd` (if the points turn out to fall on a regular grid -- then
+  `read_grd()` picks it up directly, no further changes needed) or to a
+  clean CSV (if they don't -- e.g. a gravimeter/magnetometer log taken
+  along a ship track, like `MV1007`'s own `FLAMINGO_FAA_xyg.txt.gz`
+  free-air gravity file, is a 1D sequence of points along a track, not a
+  grid, and this script correctly detects that and does NOT try to force
+  it onto one). No new dependency -- pure Python + `netcdf_lite`. **Not
+  wired into the viewer**: a scattered along-track numeric value (mGal, nT)
+  doesn't fit the existing CSV track-point upload either, since that feature
+  colours by a categorical status string, not a continuous value -- adding
+  a real continuous-value track overlay to Viewer3D is a possible follow-up,
+  not done yet.
+
+### Setup: what needs installing before the cruise
+
+This project's core requirement is working without reliable internet during
+the actual cruise, so **anything installed only in a temporary tool
+environment doesn't count** -- it has to land in the *persistent* `scripts/
+venv/` (see `scripts/README.md`'s "One-time setup"), not just wherever
+`pip3`/`python3` happen to resolve to in whatever shell you run a one-off
+install command from. `rasterio`, `pyproj`, and `segyio` are already in
+`scripts/requirements.txt` alongside numpy/scipy/tifffile, so the normal
+one-time setup covers them -- no separate install step:
+
+```bash
+cd scripts
+./setup_env.sh          # Windows: setup_env.bat
+```
+
+`rasterio` bundles its own GDAL (no separate system GDAL install needed on
+most platforms); `pyproj` handles CRS reprojection; `segyio` reads SEGY.
+None of the three are needed for the classic-NetCDF3 `.grd` path most
+datasets in this project use -- only for GeoTIFF, GMT's NetCDF4/HDF5 `.grd`
+variant (see above), SEGY, and the crop/reproject script. Confirm they're
+importable before you lose internet access -- **use `venv/bin/python3`
+directly, not a bare `python3`** (see the "run scripts with `venv/bin/
+python3`, not `source activate`" warning in `scripts/README.md` -- a bare
+`python3`/`pip3` can silently mean the wrong Python, especially after moving
+the drive to a different machine or mount point):
+
+```bash
+venv/bin/python3 -c "import rasterio, pyproj, segyio; print('ok')"
+```
 
 ## Basemap vs. survey colouring
 
@@ -404,21 +662,45 @@ channel to show -- see "Colour by depth or backscatter" above):
   full-corridor scale where both are mostly ocean-blue), and because the
   colors mean the same real elevation everywhere, it's the one ramp that
   still makes sense for a basemap spanning both land and sea at once.
+  **Reserve this for an actual wide background/context layer** -- see the
+  background-layer side effect below, and `relief` just below for a
+  foreground survey that happens to include land.
+- `relief` -- land + ocean like `globe` (hinged exactly at sea level), but
+  ocean and land are each rescaled to *this dataset's own* min/max (like
+  `depth`) rather than `globe.cpt`'s fixed domain, and land is coloured with
+  a distinct warm rust-to-gold ramp (not `globe`'s green-to-tan-to-grey) so
+  a `relief` dataset and `GMRT_basemap` never look alike even though both
+  show combined land+ocean. For a **detailed foreground survey** whose own
+  footprint happens to include real land -- `depth` would crush the ocean
+  floor into one dark band scaled against land elevation it has nothing to
+  do with (what `Mittelstaedt_Galapagos_Bathy` looked like at first --
+  "basically all is the darkest blue with almost no variation"); `globe`
+  fixes the contrast but silently reclassifies the dataset as a background
+  layer (see below) and makes it indistinguishable from `GMRT_basemap` if
+  both are on ("now it's the same color as the base map"). `relief` is the
+  fix that avoids both: full contrast on both land and sea, visually
+  distinct from `globe`, no background-layer side effect.
 
 Any dataset built with `--colormap globe` is also, by that fact alone,
-treated by `app.js` as a background layer: its rendered elevation is
-sunk by a fixed 120 m (before the exaggeration multiply, so the effect
-scales the same way as everything else and stays proportionally tiny)
-relative to its real value. This isn't visible on the basemap itself --
-it exists purely so a detailed survey's real elevation is always fractionally
-closer to the camera than the basemap's at the same lon/lat, which makes the
-GPU depth test resolve consistently in the survey's favor everywhere it has
-data. Without this, a survey checked on top of the basemap would z-fight --
-flicker pixel-by-pixel between the two nearly-coincident surfaces -- which
-showed up as a patchy/"holey" look wherever the two overlapped (worse than
-with the basemap off, since off there was nothing to fight with). If you add
-another basemap-style layer with `--colormap globe`, it gets this for free;
-there's no separate flag to opt in.
+treated by `app.js` as a background layer (checked via `meta.json`'s
+`colormap_stops.domain === "absolute_m"` -- `relief`'s domain is the
+deliberately different `"absolute_m_survey"`, exactly so it's exempt): its
+rendered elevation is sunk by a fixed 120 m (before the exaggeration
+multiply, so the effect scales the same way as everything else and stays
+proportionally tiny) relative to its real value. This isn't visible on the
+basemap itself -- it exists purely so a detailed survey's real elevation is
+always fractionally closer to the camera than the basemap's at the same
+lon/lat, which makes the GPU depth test resolve consistently in the
+survey's favor everywhere it has data. Without this, a survey checked on
+top of the basemap would z-fight -- flicker pixel-by-pixel between the two
+nearly-coincident surfaces -- which showed up as a patchy/"holey" look
+wherever the two overlapped (worse than with the basemap off, since off
+there was nothing to fight with). If you add another basemap-style layer
+with `--colormap globe`, it gets this for free; there's no separate flag to
+opt in -- and that's exactly why a detailed foreground survey should use
+`relief`, not `globe`, even if it also has land in it: two background-
+flagged layers sunk to the same offset over the same footprint would be
+liable to z-fight with *each other*.
 
 ## Adding another dataset
 
@@ -723,63 +1005,84 @@ points") to arm picking -- the status line under the buttons confirms
 picking is armed -- then click anywhere on the rendered surface twice. The
 first click drops a persistent marker labelled "A"; the second drops "B",
 draws a line between them draped along the sampled surface, and computes/
-renders the depth profile. "Clear" removes the markers, line, and chart and
-re-arms nothing (click "Pick 2 points" again to start a new one). Only one
+renders one small chart **per currently-checked dataset**, stacked in the
+panel. "Clear" removes the markers, line, and every chart, and re-arms
+nothing (click "Pick 2 points" again to start a new one). Only one
 cross-section is kept at a time -- picking a new pair replaces the old one.
 
-**How the profile is computed:** the straight-line geodesic between A and B
-(true great-circle distance via `Cesium.EllipsoidGeodesic`, not a flat-map
-approximation) is divided into 60 evenly-spaced sample points, and each one
-is snapped onto the currently-rendered surface with the same
-`scene.sampleHeight` technique the track points use -- so, like track
-points, the profile follows whichever dataset is actually checked on and on
-top at each sample location, not a fixed source grid. Depth values shown
-are true depth with the current vertical exaggeration divided back out,
-same convention as the surface-click depth readout. If a stretch of the
-line crosses an area with nothing checked underneath, those sample points
-come back as gaps -- the draped line and chart both break at a gap rather
-than interpolating or guessing across it, and the status line under the
-buttons reports how many of the 60 sample points had coverage.
+**One plot per layer, not one merged plot:** earlier this tool sampled
+whatever surface was topmost at each point (via `scene.sampleHeight`), so
+checking a bathymetry layer and a geophysics layer over the same line only
+ever showed one line -- whichever dataset happened to win the GPU depth
+test. That's fine for a single bathymetry survey, but useless for comparing
+"how does the magnetic anomaly behave over this ridge" against the
+bathymetry itself along the same line, which is exactly what a cruise needs
+this tool for. Now each checked dataset is sampled independently, directly
+against its **own** reconstructed grid (the same exact, non-interpolated
+`(lon,lat) -> value` un-flatten `buildDatasetElevationRaster`/
+`buildDatasetValueRaster` use for the GeoTIFF exporter, applied to a
+dataset's `z_m` for a bathymetry/backscatter layer, or its raw `value`
+section -- nT/mGal/km/degC, see "Geophysics layers" above -- for a
+geophysics layer) -- so a bathymetry chart and a magnetic-anomaly chart for
+the same A-B line are both fully populated wherever each dataset actually
+has data, independent of which one is "on top" visually or which was
+checked first.
 
-**Performance note:** computing a cross-section does 60 real
-`scene.sampleHeight` calls, each an actual render-pass query against the
-GPU, so it isn't instant -- the "Computing cross-section..." loading
-overlay covers this pause (typically a couple of seconds; longer on a
-slower/software-rendered GPU). This is the same underlying call the track
-points use, just run 60 times synchronously for one profile instead of
-once per uploaded point.
+**How it's computed:** the straight-line geodesic between A and B (true
+great-circle distance via `Cesium.EllipsoidGeodesic`, not a flat-map
+approximation) is divided into 60 evenly-spaced sample points. A single
+`scene.sampleHeight` pass over those 60 points (same technique the track
+points use) drapes the yellow 3D guide-line onto whatever's currently
+rendered on top, purely for the on-globe visual -- it plays no part in the
+numeric charts. Each checked dataset's own chart comes from a direct
+nearest-cell lookup of that dataset's reconstructed grid at each of the 60
+sample points' lon/lat, with no GPU call involved, so adding more checked
+layers costs nothing extra in render passes. A gap (that dataset has no data
+at that sample -- e.g. `Geophys_Mittelstaedt_MagAnomaly`'s sparse
+ship-track coverage, see "Geophysics layers" above) breaks that dataset's
+own line rather than interpolating or guessing across it; other layers'
+charts are unaffected by one layer's gaps.
+
+**Performance note:** the "Computing cross-section..." loading overlay
+covers the 60 `scene.sampleHeight` calls used for the 3D guide-line (the
+same cost as before this feature) -- the per-layer chart sampling itself is
+plain CPU array lookups and is effectively free by comparison, however many
+layers are checked.
 
 Like track points, the cross-section **recomputes automatically** whenever
-vertical exaggeration changes or datasets are checked/unchecked, so it
-always reflects what's currently on screen rather than going stale.
+vertical exaggeration changes or datasets are checked/unchecked -- checking
+or unchecking a dataset adds or removes its chart from the stack immediately,
+without needing to re-pick A/B.
 
-**Limitation:** because it samples the rendered surface rather than the
-source `.grd` grid, the profile is only as fine as whatever mesh is
-currently visible at each sample point (decimated, per "Limitations,
-honestly" below) and follows whichever checked dataset happens to be
-on top there -- for a chart-grade profile, go back to the source grid.
+**Limitation:** each dataset's chart is only as fine as that dataset's own
+decimated mesh (per "Limitations, honestly" below) -- for a chart-grade
+profile, go back to the source grid.
 
-**Downloading a profile:** once a cross-section is computed, "Download CSV"
-and "Download PNG" (below the chart) become enabled -- both are disabled
-again after "Clear" or before the first pair is picked.
+**Downloading a profile:** once a cross-section is computed and at least one
+checked layer has coverage, "Download CSV" and "Download PNG" (below the
+charts) become enabled -- both are disabled again after "Clear" or before
+the first pair is picked.
 
-- **CSV** -- one row per sample point, `distance_km,lon_deg,lat_deg,depth_m`
-  (true depth, exaggeration already divided out), preceded by a few
+- **CSV** -- one row per sample point: `distance_km,lon_deg,lat_deg`, then
+  one additional column per layer that was checked when the profile was
+  computed (named `"<layer label> (<units>)"`), preceded by a few
   `#`-comment header lines recording point A/B's own coordinates and the
   total distance. `lon_deg`/`lat_deg` are that *sample's own* position along
   the A-B line (not just the two endpoints) -- every row is independently
-  georeferenced. A gap (no coverage at that sample) is left blank in
-  `depth_m` rather than written as 0 or interpolated, so it's obvious in a
-  spreadsheet or replot which stretches had nothing checked underneath;
-  `lon_deg`/`lat_deg` are still filled in for a gap row, since the position
-  along the line is known even when the depth there isn't. Meant for
+  georeferenced. Each layer's own value is in its native units (nT, mGal,
+  km, degC, or metres for a bathymetry layer -- exaggeration never enters
+  into it, since these come from the raw grid, not a rendered height); a gap
+  (no coverage in that layer at that sample) is left blank in that column
+  rather than written as 0 or interpolated, so it's obvious in a spreadsheet
+  or replot which stretches had no coverage in which layer. Meant for
   re-plotting or further analysis outside the viewer (Python/Excel/MATLAB/etc).
-- **PNG** -- a snapshot of the depth-profile chart exactly as drawn in the
-  panel (same pixel dimensions as the on-screen canvas), including a small
-  header row giving point A and point B's lon/lat (to 3 decimal places) so
-  the image is self-contained -- you don't need the CSV or the on-page
-  status text alongside it to know where the profile was taken. Good for
-  dropping straight into a slide or write-up.
+- **PNG** -- every currently-rendered per-layer chart stacked into one tall
+  image, in the same top-to-bottom order shown in the panel. Each chart
+  carries its own label and a small header row giving point A -> B's lon/lat
+  (to 2 decimal places), so the image is self-contained -- you don't need
+  the CSV or the on-page status text alongside it to know what each chart is
+  or where the profile was taken. Good for dropping straight into a slide or
+  write-up.
 
 Both go through the browser's normal download mechanism, same as the
 GeoTIFF export below.
@@ -804,6 +1107,32 @@ GeoTIFF export below.
   issues" above); writes `GMRT_corridor_basemap_clean.grd` alongside the
   untouched original. Re-run it if `GMRT_corridor_basemap.grd` is ever
   re-fetched from GMRT.
+- `scripts/crop_reproject_doa_etp.py` -- crops + reprojects a GeoTIFF from
+  a projected CRS to lon/lat via a memory-safe streaming `WarpedVRT` read
+  (see "Reading other formats" above); a general pattern to copy for the
+  next GeoTIFF, not specific to this one file.
+- `scripts/segy_inspect.py`, `scripts/ascii_xyz_to_grd.py` -- SEGY
+  cataloging and ASCII-to-grid/CSV conversion (see "Reading other formats"
+  above). Need `segyio` / nothing extra, respectively.
+- `DOA_ETP_MBES/` -- the Deep Ocean Alliance–ETP regional MBES compilation:
+  `MBES_bathymetric_compilation_V1_2025.tif` (the original download, EPSG:3395,
+  untouched) and `DOA_ETP_MBES_galapagos_corridor_4326_clean.tif` (cropped +
+  reprojected, what `DOA_ETP_MBES_corridor` is built from). Not under
+  `Viewer3D/` since it's a shared source dataset like the others in the
+  project's data folders, not a viewer build product.
+- `FOR_TUSHAR/` -- the Mittelstaedt group's own Galapagos-platform
+  compilation (`CUT_bath.grd`, `CUT_FA.grd`, `CUT_maganom_1km_blockmed.grd`,
+  `CUT_magnetization.grd`, `CUT_RMBA.grd`; GMT NetCDF4/HDF5 -- see "Reading
+  other formats" above) plus `CUT_bath_clean.tif` (the spike-repaired
+  bathymetry -- see "Known data-quality issues" above), what
+  `Mittelstaedt_Galapagos_Bathy` and the four `Geophys_Mittelstaedt_*`
+  layers are built from. Also a shared source dataset, not a viewer build
+  product.
+- `scripts/fix_mittelstaedt_bath_spikes.py` -- one-off repair for the Wolf
+  Island/Darwin Island bad-data spikes in `FOR_TUSHAR/CUT_bath.grd` (see
+  "Known data-quality issues" above); writes `CUT_bath_clean.tif` alongside
+  the untouched original. Re-run it if `CUT_bath.grd` is ever replaced with
+  a fresh export.
 - `test_track_points.csv` -- 15 randomly-scattered lat/lon points across the
   full basemap corridor, with a random status column (see "Track point
   status colours" above), for exercising the track-points CSV upload feature
@@ -816,11 +1145,12 @@ GeoTIFF export below.
   vertex mesh, not a continuous surface -- for chart-grade precision
   measurements go back to the source `.grd` files, not this viewer. Every
   dataset row (and `meta.json`) shows both its native and shown resolution
-  side by side; all four survey grids now ship at full native (`GMRT_basemap`
-  is deliberately coarser, as a wide regional context layer -- see "Known
-  data-quality issues" above). Checking on more than one or two native-
-  resolution survey layers at once is heavy for a laptop GPU -- see "Native
-  vs. shown resolution" above for the file sizes and triangle counts.
+  side by side; all four single-survey grids now ship at full native
+  (`GMRT_basemap` and `DOA_ETP_MBES_corridor` are both deliberately coarser,
+  as wide regional context layers -- see "Known data-quality issues" above).
+  Checking on more than one or two native-resolution survey layers at once
+  is heavy for a laptop GPU -- see "Native vs. shown resolution" above for
+  the file sizes and triangle counts.
 - `GMRT_basemap`'s source grid had two bad-data spikes at Wolf and Darwin
   Islands (up to 6288 m where the real peak is 165 m) which are now
   repaired; a separate, much larger area of likely-bad cells in the

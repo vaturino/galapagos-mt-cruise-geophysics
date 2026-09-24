@@ -45,12 +45,168 @@ WGS84_A = 6378137.0
 WGS84_F = 1.0 / 298.257223563
 WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
 
+GEOTIFF_EXTENSIONS = {".tif", ".tiff"}
+
 
 def log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+class _RasterioRowReader:
+    """Row-indexable, lazily-read adapter over a rasterio dataset's band 1,
+    so the existing netCDF-oriented code (tight_bbox's chunked z[r0:r1, :]
+    reads, scan_populated's z[rr:rr1, c0:c1+1] reads, decimate_one_grid's
+    per-row z[int(ridx), :] reads) works against a GeoTIFF OR a NetCDF4/HDF5
+    '.grd' source (rasterio's GDAL netCDF driver opens both) unchanged --
+    neither of those access patterns holds the full raster in memory at
+    once, same as the classic-NetCDF3 mmap path.
+
+    Also supports scattered point lookup -- z[row_idx, col_idx] with integer
+    numpy arrays, as used by build_geophysics_drape.py's terrain-elevation
+    sampling. That path DOES materialise the whole band once (cached after
+    the first call) since rasterio has no cheap arbitrary-scatter read; fine
+    for a terrain reference grid up to _MAX_FULL_READ_BYTES, but raises
+    rather than silently paying for something much bigger -- the same
+    "refuse rather than mishandle" choice the old GeoTIFF-backscatter guard
+    in main() makes for the same reason.
+
+    Nodata is translated to NaN on every windowed read: the rest of this
+    script tests coverage with np.isfinite(), and nodata can be a large
+    *finite* sentinel (GeoTIFF, e.g. 3.4e38) rather than NaN -- left
+    untranslated it would silently get treated as real data.
+    """
+
+    _MAX_FULL_READ_BYTES = 1_500_000_000  # ~1.5 GB float64 full-band cap
+
+    def __init__(self, dataset):
+        self._ds = dataset
+        self.shape = (dataset.height, dataset.width)
+        self._nodata = dataset.nodata
+        self._full = None
+
+    def _clean(self, arr):
+        if self._nodata is not None:
+            bad = (arr == self._nodata) | (np.abs(arr) >= 1e30)
+            if bad.any():
+                arr = np.where(bad, np.nan, arr)
+        return arr
+
+    def __getitem__(self, index):
+        if isinstance(index, tuple) and isinstance(index[0], np.ndarray):
+            row_idx, col_idx = index
+            if self._full is None:
+                nbytes = self.shape[0] * self.shape[1] * 8
+                if nbytes > self._MAX_FULL_READ_BYTES:
+                    raise NotImplementedError(
+                        f"scattered point lookup on a {nbytes/1e9:.1f} GB band isn't "
+                        "supported -- this reads the whole band into memory once, fine "
+                        "for a terrain reference grid but not for something this large. "
+                        "Downsample the terrain source first, or extend this with a "
+                        "chunked/windowed gather if this comes up."
+                    )
+                self._full = self._clean(self._ds.read(1).astype(np.float64))
+            return self._full[row_idx, col_idx]
+
+        # Supports the remaining access patterns this script actually uses
+        # against z: z[r0:r1, :] (tight_bbox), z[rr:rr1, c0:c1+1]
+        # (scan_populated), and z[int(ridx), :] (decimate_one_grid's per-row
+        # read) -- NOT arbitrary fancy indexing on both axes at once (not
+        # needed by anything here).
+        from rasterio.windows import Window  # local import: only needed on this path
+
+        row_idx, col_idx = index if isinstance(index, tuple) else (index, slice(None))
+
+        def bounds(idx, n):
+            if isinstance(idx, slice):
+                start = 0 if idx.start is None else idx.start
+                stop = n if idx.stop is None else idx.stop
+                return start, stop - start, True
+            return int(idx), 1, False
+
+        r0, rn, r_is_slice = bounds(row_idx, self.shape[0])
+        c0, cn, c_is_slice = bounds(col_idx, self.shape[1])
+        arr = self._ds.read(1, window=Window(c0, r0, cn, rn))
+        if not r_is_slice:
+            arr = arr[0]
+        if not c_is_slice:
+            arr = arr[..., 0]
+        return self._clean(arr)
+
+
+def _read_geotiff(path):
+    try:
+        import rasterio
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            f"{path} is a GeoTIFF, which needs `rasterio` to read (pip install "
+            "rasterio) -- not required for the NetCDF/.grd path."
+        ) from exc
+    ds = rasterio.open(path)
+    if ds.crs is None or ds.crs.to_epsg() != 4326:
+        raise ValueError(
+            f"{path}: CRS is {ds.crs}, not EPSG:4326 (plain lon/lat) -- reproject "
+            "first (see scripts/crop_reproject_doa_etp.py for the pattern: a "
+            "WarpedVRT read out in row-blocks, not a whole-array reproject, to "
+            "stay memory-safe). This script assumes an axis-aligned lon/lat grid."
+        )
+    transform = ds.transform
+    if abs(transform.b) > 1e-12 or abs(transform.d) > 1e-12:
+        raise ValueError(f"{path}: raster is rotated/sheared -- not supported")
+    ny, nx = ds.height, ds.width
+    x = transform.c + (np.arange(nx) + 0.5) * transform.a
+    y = transform.f + (np.arange(ny) + 0.5) * transform.e
+    z = _RasterioRowReader(ds)
+    return x, y, z, ds  # ds.close() mirrors netcdf_file's nc.close()
+
+
+_HDF5_SIGNATURE = b"\x89HDF\r\n\x1a\n"
+
+
+def _is_hdf5(path):
+    """GMT writes '.grd' files as either classic NetCDF3 (what
+    netcdf_lite.py/scipy.io.netcdf_file read) or NetCDF4-on-HDF5 (GMT>=6's
+    own default, and what every FOR_TUSHAR grid turned out to be) -- both
+    use the same '.grd' extension, so dispatch on the file's own magic bytes
+    rather than trusting the name."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(8) == _HDF5_SIGNATURE
+    except OSError:
+        return False
+
+
+def _read_netcdf4_grd(path):
+    try:
+        import rasterio
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise ImportError(
+            f"{path} is a NetCDF4/HDF5 '.grd' (GMT>=6's default output format, "
+            "distinct from the classic NetCDF3 netcdf_lite.py/scipy.io.netcdf_file "
+            "path), which needs `rasterio` to read (pip install rasterio)."
+        ) from exc
+    ds = rasterio.open(path)
+    # No CRS check here (unlike _read_geotiff): GMT '.grd' grids in this
+    # pipeline never carry an embedded CRS -- x/y (or lon/lat) are geographic
+    # degrees by convention, exactly like the classic-NetCDF3 path below,
+    # which has never checked CRS either. rasterio/GDAL's netCDF driver
+    # reports ds.crs=None for these; that's expected, not an error.
+    transform = ds.transform
+    if abs(transform.b) > 1e-12 or abs(transform.d) > 1e-12:
+        raise ValueError(f"{path}: raster is rotated/sheared -- not supported")
+    ny, nx = ds.height, ds.width
+    x = transform.c + (np.arange(nx) + 0.5) * transform.a
+    y = transform.f + (np.arange(ny) + 0.5) * transform.e
+    z = _RasterioRowReader(ds)
+    return x, y, z, ds  # ds.close() mirrors netcdf_file's nc.close()
+
+
 def read_grd(path):
+    if Path(path).suffix.lower() in GEOTIFF_EXTENSIONS:
+        return _read_geotiff(path)
+
+    if _is_hdf5(path):
+        return _read_netcdf4_grd(path)
+
     nc = netcdf_file(path, "r", mmap=True)
     # Modern COARDS-style x/y/z is the common case (GeoMapApp-ready grids,
     # most MGDS products after fix_mgds_grid.py). GMRT's own GridServer
@@ -182,6 +338,68 @@ def build_globe_colormap():
         dtype=np.float64,
     )
     return ocean, land
+
+
+def build_land_relief_colormap():
+    # warm rust -> gold ramp for land elevation -- fitting for volcanic
+    # islands, and deliberately a different hue family from every other
+    # ramp in this project: globe.cpt's land side (green -> tan -> grey/
+    # white), the blue depth/backscatter ramps, and the geophysics
+    # diverging/sequential ramps. A dataset using build_local_relief_colormap
+    # (below) stays visually distinct from GMRT_basemap (built with
+    # --colormap globe) even though both show combined land+ocean --
+    # they'd otherwise render in the same palette and be indistinguishable
+    # when both are checked on, which is what happened the first time this
+    # dataset borrowed --colormap globe outright instead of getting its own
+    # locally-scaled ramp.
+    stops = np.array(
+        [
+            [0.00, 70, 35, 20],
+            [0.35, 150, 70, 25],
+            [0.70, 205, 130, 40],
+            [1.00, 245, 195, 100],
+        ],
+        dtype=np.float64,
+    )
+    return stops
+
+
+def apply_local_relief_colormap(z_m, ocean_stops_t, land_stops_t):
+    """Like apply_globe_colormap, but the ocean/land stop tables are keyed to
+    THIS dataset's own min/max (still hinged exactly at sea level) rather
+    than globe.cpt's fixed universal -10000..+10000 m domain. For bathymetry
+    that includes real land: a plain --colormap depth rescale-to-own-min/max
+    would stretch across both land elevation and ocean depth in one ramp,
+    crushing the ocean floor (usually the great majority of the mesh) into a
+    narrow band near one end -- exactly what happened before this existed.
+    Splitting ocean/land and rescaling each side independently keeps full
+    ocean-depth contrast regardless of how high the land in the same file
+    goes, without borrowing globe.cpt's fixed domain (which would also flag
+    this dataset as a background layer to app.js -- see BASEMAP_DEPTH_BIAS_M
+    in app.js; a detailed foreground survey should not get that treatment).
+    Returns (rgb, ocean_abs_stops, land_abs_stops) -- the abs stops (still
+    [elev_m, r, g, b] rows, just over this dataset's own range instead of
+    globe.cpt's) are what gets written to meta.json for the legend."""
+    z = z_m.astype(np.float64)
+    ocean_mask = z <= 0
+    land_mask = ~ocean_mask
+    ocean_min = float(z[ocean_mask].min()) if ocean_mask.any() else -1.0
+    land_max = float(z[land_mask].max()) if land_mask.any() else 1.0
+
+    def to_abs(stops_t, lo, hi):
+        abs_stops = stops_t.copy()
+        abs_stops[:, 0] = lo + stops_t[:, 0] * (hi - lo)
+        return abs_stops
+
+    ocean_abs = to_abs(ocean_stops_t, ocean_min, 0.0)
+    land_abs = to_abs(land_stops_t, 0.0, land_max)
+
+    out = np.empty((z.shape[0], 3), dtype=np.uint8)
+    for ch in range(3):
+        ocean_c = np.interp(z, ocean_abs[:, 0], ocean_abs[:, 1 + ch])
+        land_c = np.interp(z, land_abs[:, 0], land_abs[:, 1 + ch])
+        out[:, ch] = np.where(land_mask, land_c, ocean_c).astype(np.uint8)
+    return out, ocean_abs, land_abs
 
 
 def apply_globe_colormap(z_m, ocean_stops, land_stops):
@@ -324,12 +542,20 @@ def main():
                           "Negated on read so the mesh always uses negative-below-sea-level like GeoMapApp/GMRT.")
     ap.add_argument("--label", help="display label for this dataset in the viewer's dropdown/checkbox list "
                                      "(default: derived from the first --bathy filename)")
-    ap.add_argument("--colormap", choices=["depth", "globe"], default="depth",
-                     help="'depth' (default): navy-to-pale-cyan ramp rescaled to this dataset's own min/max "
-                          "-- good for a single detailed survey. 'globe': the real GMT/GMRT 'globe.cpt' relief "
-                          "palette on its fixed -10000..+10000 m domain, land included -- use this for a wide "
-                          "regional basemap layer so it reads as context, visually distinct from the survey "
-                          "meshes on top of it.")
+    ap.add_argument("--colormap", choices=["depth", "globe", "relief"], default="depth",
+                     help="'depth' (default): navy-to-pale-cyan ramp rescaled to this dataset's own min/max -- "
+                          "good for a single detailed OCEAN-ONLY survey (a positive elevation in the data still "
+                          "gets colored, just squeezed to the ramp's top end -- fine if there's none or almost "
+                          "none). 'globe': the real GMT/GMRT 'globe.cpt' relief palette on its FIXED "
+                          "-10000..+10000 m domain, land included -- for a wide regional BACKGROUND/basemap "
+                          "layer (this also flags the dataset to app.js as background context, sinking its "
+                          "rendered depth slightly so detailed surveys always render in front of it -- see "
+                          "BASEMAP_DEPTH_BIAS_M in app.js). 'relief': like 'globe' -- land + ocean, hinged at "
+                          "sea level -- but ocean and land are each rescaled to THIS dataset's own min/max "
+                          "(not globe.cpt's fixed domain) and rendered in a distinct warm land palette, so a "
+                          "detailed survey whose own footprint includes real land (unlike most datasets here) "
+                          "still shows full ocean-depth contrast without being mistaken for a background layer "
+                          "or for GMRT_basemap when both are checked on.")
     args = ap.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -411,7 +637,19 @@ def main():
         ocean_stops, land_stops = build_globe_colormap()
         depth_rgb = apply_globe_colormap(z_v.astype(np.float64), ocean_stops, land_stops)
         # absolute-domain colormap for the legend: elevation (m) -> rgb, not t in [0,1]
+        # NOTE: this exact domain string ("absolute_m") is also what flags a
+        # dataset as a background layer in app.js (isBasemapLayer / the
+        # BASEMAP_DEPTH_BIAS_M sink) -- 'relief' below deliberately uses a
+        # different domain string so it does NOT get that treatment.
         colormap_stops_meta = {"domain": "absolute_m", "ocean": ocean_stops.tolist(), "land": land_stops.tolist()}
+    elif args.colormap == "relief":
+        ocean_stops_t = build_depth_colormap()
+        land_stops_t = build_land_relief_colormap()
+        depth_rgb, ocean_abs, land_abs = apply_local_relief_colormap(z_v, ocean_stops_t, land_stops_t)
+        # absolute-domain (elevation-keyed) for the legend, like 'globe', but
+        # over this dataset's own range -- "absolute_m_survey", NOT
+        # "absolute_m", so app.js's background-layer flag doesn't trigger.
+        colormap_stops_meta = {"domain": "absolute_m_survey", "ocean": ocean_abs.tolist(), "land": land_abs.tolist()}
     else:
         depth_stops = build_depth_colormap()
         depth_rgb = apply_colormap(z_v, zmin, zmax, depth_stops)
@@ -425,6 +663,16 @@ def main():
     bs_values_full = None
     bs_colormap_stops_meta = None
     if args.backscatter:
+        if Path(args.backscatter).suffix.lower() in GEOTIFF_EXTENSIONS:
+            raise NotImplementedError(
+                "--backscatter as a GeoTIFF isn't supported yet: the matching "
+                "step below does scattered point indexing (sz[row_array, "
+                "col_array]), which _GeoTiffRowReader doesn't implement (it "
+                "only supports the contiguous-window reads bathymetry decimation "
+                "uses). Convert the backscatter grid to NetCDF first, or extend "
+                "_GeoTiffRowReader with a fancy-index path (e.g. rasterio's "
+                "dataset.sample()) if this comes up."
+            )
         log(f"reading backscatter: {args.backscatter}")
         sx, sy, sz, snc = read_grd(args.backscatter)
         s_dx = sx[1] - sx[0]
