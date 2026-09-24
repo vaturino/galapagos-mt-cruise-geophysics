@@ -18,20 +18,23 @@ and is not versioned in this repository.
 
 ## Setup
 
-Requires Python 3.9+. Most scripts need numpy, scipy, and tifffile, installed
-into a local virtual environment (not committed to the repository, and not
-shared between machines — each one is tied to the OS/architecture it was
-built on):
+Requires Python 3.9+. Most scripts need a handful of packages (numpy, scipy,
+tifffile, rasterio, pyproj, segyio), installed into a local virtual
+environment (not committed to the repository, and not shared between
+machines — each one is tied to the OS/architecture it was built on):
 
 ```bash
 cd scripts
 ./setup_env.sh        # Windows: setup_env.bat
-source venv/bin/activate
 ```
 
-This needs internet access once, to fetch the three packages from PyPI.
-Everything else runs offline afterward. A couple of scripts (`extract_geomapapp_layers.py`,
-the mmap-based inspectors) are stdlib-only and need no environment at all.
+This needs internet access once, to fetch the packages from PyPI. Everything
+else runs offline afterward — run scripts directly as `venv/bin/python3
+script.py` (`venv\Scripts\python.exe` on Windows), not `source venv/bin/
+activate` first; see [`scripts/README.md`](scripts/README.md)'s "One-time
+setup" for why that matters. A couple of scripts
+(`extract_geomapapp_layers.py`, the mmap-based inspectors) are stdlib-only
+and need no environment at all.
 
 ## Data
 
