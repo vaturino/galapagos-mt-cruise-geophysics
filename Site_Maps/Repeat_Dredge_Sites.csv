@@ -1,0 +1,4 @@
+permit_site,lat,lon,depth_m,mv1007,mv_class,mv_depth_m,dist_onbottom_km,dist_track_km,mv_location,mv_recovery,mv_description,nearest_glass,nearest_glass_km,nearest_glass_lat,nearest_glass_lon
+D7,1.5093189,-92.00629,1388,D14,no glass,1423,0.87,0.45,Top of seamount near Pseudofault on WDL,1/4 bag,altered basalt fragments,MV1007 D13,2.7,1.4861,-91.99781666666667
+D25,1.5966837,-91.24925,1123,D22,no glass,1130,0.89,0.89,"Big Round Seamount, second seamount from north on Lineament 2",150 kg,pillow and flow fragments with green/blue alteration,SO158 DR46-A,14.2,1.71,-91.19
+D26,1.382921,-91.1816,1774,D23,no rock,1946,0.92,0.92,"Small seamount, third from north on lineament 2",sediment only,no rock recovery,SO158 DR41-A,17.3,1.24,-91.12
