@@ -1,0 +1,105 @@
+cruise,station,samples,lat,lon,depth,glass,source,note,off_lat,off_lon,location,recovery,description
+MV1007,D01,D01,0.7882333333333332,-90.91193333333334,2095.0,no glass,MV1007 dredge log (on-bottom position),,0.7868499999999999,-90.90155,Flow boundary W of Pinta,"<1/4 bag, giant pillow wrapped on cable",pillow and pillow fragments
+MV1007,D02,D02,0.8424833333333334,-90.79373333333334,1438.0,no glass,MV1007 dredge log (on-bottom position),,0.8433333333333334,-90.80248333333333,Pinta Ridge,<1/4 bag,pillow blocks and rind
+MV1007,D03,D03,0.4598833333333333,-90.70938333333334,627.0,no glass,MV1007 dredge log (on-bottom position),,0.46225,-90.71371666666667,Fractures at Pinta and Marchena,1/3 bag,prismatic blocks and flow chunks
+MV1007,D04,D04,0.39303333333333335,-90.12038333333334,893.0,no glass,MV1007 dredge log (on-bottom position),,0.39575,-90.14638333333333,Seamount between Genovesa and Marchena,2/3 bag,pillows and prismatic blocks
+MV1007,D05,D05,-0.045316666666666665,-90.20185,836.0,no glass,MV1007 dredge log (on-bottom position),not in spreadsheet; class from log description,-0.040383333333333334,-90.2048,small flat cone near the SE corner of shoal S of Marchena,>2/3 bag,old altered pillows
+MV1007,D06,D06,-0.03986666666666667,-90.205,828.0,no glass,MV1007 dredge log (on-bottom position),not in spreadsheet; class from log description,-0.03186666666666667,-90.20858333333334,SE corner of shoal S of Marchena,2/3 bag,old altered pillows
+MV1007,D07,D07,-0.035416666666666666,-90.24973333333334,529.0,no glass,MV1007 dredge log (on-bottom position),,-0.029108333333333333,-90.25365,Upper flanks of shoal S of Marchena,>2/3 bag,"old altered flow/pillow pieces, some potetially subaerial rounded cobbles"
+MV1007,D08,D08,0.8772166666666668,-91.29441666666666,1600.0,no glass,MV1007 dredge log (on-bottom position),,0.8820833333333333,-91.29861666666666,Southern WDL seamount base,1/4 bag,pillow and flow fragments
+MV1007,D09,D09,0.7883333333333333,-91.30215,589.0,no glass,MV1007 dredge log (on-bottom position),,0.7896166666666667,-91.30425,Southern WDL seamount summit,2/3 bag,pillows and pillow fragments
+MV1007,D10,D10,1.2261666666666666,-91.67428333333334,1619.0,no glass,MV1007 dredge log (on-bottom position),,1.2281,-91.67635,WDL lava field S of Wolf,1/4 bag,pillow fragments
+MV1007,D11,D11,1.34825,-91.70965,2093.0,no glass,MV1007 dredge log (on-bottom position),,1.3499333333333334,-91.71143333333333,Base of Wolf,1/3 bag,pillows and pillow fragments
+MV1007,D12,D12,1.3715,-91.7615,1241.0,glass,MV1007 dredge log (on-bottom position),,1.3729333333333333,-91.76291666666667,Mid-slope of Wolf,<1/4 bag,pillow fragment and glassy rinds
+MV1007,D13,D13,1.4861,-91.99781666666667,2201.0,glass,MV1007 dredge log (on-bottom position),,1.4895333333333334,-92.00121666666666,Base of seamount on WDL near Pseudofault,1/3 bag,"basalt clasts, glass, abundant sediment"
+MV1007,D14,D14,1.5049000000000001,-91.99981666666666,1423.0,no glass,MV1007 dredge log (on-bottom position),"off-bottom lon logged 91 0.157'W, corrected to 92 0.157'W",1.5077166666666666,-92.00261666666667,Top of seamount near Pseudofault on WDL,1/4 bag,altered basalt fragments
+MV1007,D15,D15,1.5930333333333333,-91.9658,1447.0,no glass,MV1007 dredge log (on-bottom position),,1.59495,-91.96765,Base of Darwin,1/3 bag,pillow fragments
+MV1007,D16,D16,1.9849666666666668,-92.146,2135.0,no glass,MV1007 dredge log (on-bottom position),,1.9882833333333334,-92.14991666666667,Western-most drip on the GSC,1/2 bag,pillows and pillow fragments
+MV1007,D17,D17,1.9460833333333334,-91.80611666666667,1805.0,no glass,MV1007 dredge log (on-bottom position),,1.9489166666666669,-91.80898333333333,Northern-most seamount on lineament 1,1/3 bag,pillow fragments
+MV1007,D18,D18,1.8377166666666667,-91.74606666666666,2120.0,glass,MV1007 dredge log (on-bottom position),,1.8414666666666668,-91.74983333333333,Second most northern seamount on lineament 1,<1/4 bag,basalt and glass fragments
+MV1007,D19,D19,1.6724333333333332,-91.68536666666667,1271.0,no glass,MV1007 dredge log (on-bottom position),,1.6750166666666666,-91.6879,Cheerio seamount: third seamount from North on lineament 1,>2/3 bag,pillow and pillow fragments
+MV1007,D20,D20,1.5674166666666667,-91.61155,1587.0,no glass,MV1007 dredge log (on-bottom position),,1.5703333333333334,-91.61428333333333,Nubbin: fourth seamount from north on lineament 1,2 kg,pillow fragments
+MV1007,D21,D21,1.8798166666666667,-91.2822,1694.0,no glass,MV1007 dredge log (on-bottom position),,1.8826333333333332,-91.2826,"Tea Cup Dredge: first seamount on lineament 2, drip on GSC",1/2 bag,basalt and Mn nodules
+MV1007,D22,D22,1.6035,-91.25345,1130.0,no glass,MV1007 dredge log (on-bottom position),,1.6063,-91.25625,"Big Round Seamount, second seamount from north on Lineament 2",150 kg,pillow and flow fragments with green/blue alteration
+MV1007,D23,D23,1.3771666666666667,-91.17566666666667,1946.0,no rock,MV1007 dredge log (on-bottom position),,1.3771666666666667,-91.17566666666667,"Small seamount, third from north on lineament 2",sediment only,no rock recovery
+MV1007,D24,D24,1.3527666666666667,-91.39888333333333,2169.0,no glass,MV1007 dredge log (on-bottom position),,1.35775,-91.40021666666667,"Pseudofault north, between lineament 1 and 2",handful,"small basalt and Mn pieces, sediment"
+MV1007,D25,D25,1.1609166666666666,-91.45863333333334,2109.0,no glass,MV1007 dredge log (on-bottom position),,1.16495,-91.46285,"Pseudofault south, between lineament 1 and 2",10 kg,"breccia and ultramafic nodules, some debate on mineral IDs"
+MV1007,D26,D26,1.2172833333333333,-91.10056666666667,1073.0,glass,MV1007 dredge log (on-bottom position),,1.22045,-91.10363333333333,"The BFS: large seamount on lineament 2, fourth from north","single rock, glass from burlap","plag ultraphyric basalt, glass"
+MV1007,D27,D27,1.0708666666666666,-91.025,1740.0,glass,MV1007 dredge log (on-bottom position),,1.0750166666666667,-91.02701666666667,Lava field south of BFS,2 kg,basalt fragments with glass
+MV1007,D28,D28,1.2629833333333333,-91.01843333333333,2041.0,no glass,MV1007 dredge log (on-bottom position),,1.2646166666666667,-91.0197,Wiener Seamount: small seamount east of BFS,1/4 bag,ol-bearing pillow and pillow fragments
+MV1007,D29,D29,1.2482666666666666,-90.879,1828.0,no glass,MV1007 dredge log (on-bottom position),,1.2493333333333334,-90.88138333333333,"Cone at ridge tip, same latitude as BFS, between BFS and transform",1 large rock (50 cm diameter),weathered pillow fragment
+MV1007,D30,D30,1.3696833333333334,-90.75298333333333,2478.0,glass,MV1007 dredge log (on-bottom position),,1.3716666666666666,-90.75496666666666,Southern of two cones dredged within the transform valley,burlap only,pillow fragments and glass
+MV1007,D31,D31,1.2743833333333334,-90.64993333333334,1436.0,no glass,MV1007 dredge log (on-bottom position),,1.2770000000000001,-90.64993333333334,"Bbray Dos: southern inside corner high, east of transform",5 kg,"pillow and flow fragments, gabbroic rock"
+MV1007,D32,D32,1.3866666666666667,-90.63166666666666,1374.0,no glass,MV1007 dredge log (on-bottom position),,1.39,-90.63,"EPIC dredge: inside corner high, north of Bbray Dos, east of transform",<1/4 bag,"pillow and flow fragments, one plag-phyric fragment"
+MV1007,D33,D33,1.5434166666666667,-90.80176666666667,2808.0,no glass,MV1007 dredge log (on-bottom position),,1.5465166666666668,-90.80391666666667,Northern of two cones dredged within the transform valley,"three rocks, max 17 cm diameter",pillow margin and rind
+MV1007,D34,D34,1.8710666666666667,-90.53001666666667,1724.0,no rock,MV1007 dredge log (on-bottom position),,1.8736833333333334,-90.53056666666667,"north fossil ridge, east of transform",burlap only,no rock recovery
+MV1007,D35,D35,1.6727333333333334,-90.53183333333334,2100.0,no glass,MV1007 dredge log (on-bottom position),,1.6748666666666665,-90.53333333333333,"Lone Survivor seamount, between D34 and D36","two rocks, max 5 cm diameter","Mn crusts, rock fragment"
+MV1007,D36,D36,1.6650166666666668,-90.48583333333333,2049.0,no glass,MV1007 dredge log (on-bottom position),,1.6675499999999999,-90.48761666666667,second-nothern-most fossil ridge,25 kg,pillow fragments
+MV1007,D37,D37,1.2535833333333333,-90.53333333333333,1482.0,glass,MV1007 dredge log (on-bottom position),,1.2556666666666667,-90.53333333333333,"southern-most fossil ridge, east of transform",5 kg,aphyric fragments and glassy fragments
+MV1007,D38,D38,0.7469833333333333,-90.48088333333334,2090.0,no glass,MV1007 dredge log (on-bottom position),,0.751,-90.44821666666667,"east GSC drip, south of GSC",15 kg,pillow fragments
+MV1007,D39,D39,1.4759166666666665,-90.4914,1638.0,no glass,MV1007 dredge log (on-bottom position),,1.4783833333333334,-90.49258333333333,"fossil ridge #3, between south fossil ridge and second from north fossil ridge",15 kg,"breccia, basalt, hyaloclastite"
+MV1007,D40,D40,1.47265,-90.46038333333334,1686.0,glass,MV1007 dredge log (on-bottom position),,1.4768333333333334,-90.4619,Lil Noname: seamount southwest of Noname Seamount and west of third-from-north fossil ridge,1 rock (14 cm diameter),"flow top, weathered glass"
+MV1007,D41,D41,1.5010333333333334,-90.3788,1579.0,no glass,MV1007 dredge log (on-bottom position),,1.5037166666666666,-90.37943333333334,Noname Seamount: large seamount on fossil ridge #3,burlap only,altered diabase
+MV1007,D42,D42,1.6894666666666667,-90.41351666666667,1672.0,no glass,MV1007 dredge log (on-bottom position),,1.6911833333333333,-90.41446666666667,"Skull Mountain, seamount north of Noname Seamount",1/5 bag,large log-shaped prismatic fragment
+MV1007,D43,D43,1.5127166666666667,-90.3916,1442.0,no glass,MV1007 dredge log (on-bottom position),,1.5155833333333333,-90.42413333333333,Redredge of Noname Seamount,70 kg,prismatic pillow fragments
+MV1007,D44,D44,1.6266833333333333,-90.25078333333333,1975.0,no glass,MV1007 dredge log (on-bottom position),,1.6292,-90.25256666666667,Pyramid: small cone on broad high east of Noname,15 kg,pillow fragment
+MV1007,D45,D45,1.57355,-90.09964333333333,1710.0,no rock,MV1007 dredge log (on-bottom position),,1.5763,-90.10036666666667,Tortuga: potential extension of a fossil ridge,burlap only,no igneous material
+MV1007,D46,D46,1.7978,-90.02353333333333,894.0,no glass,MV1007 dredge log (on-bottom position),,1.7999,-90.02476666666666,"Mount Schlitzky (summit crater), east of north fossil ridge, largest seamount in area",20 kg,fine to medium grained basalt
+MV1007,D47,D47,1.7577666666666667,-90.0102,1358.0,no glass,MV1007 dredge log (on-bottom position),,1.7605666666666666,-90.01121666666667,Base of Mount Schlitzky,handful,gabbro and breccia fragments
+TR164,TR164-20D,TR164-20D-1G,2.238,-97.858,3200.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-21D,TR164-21D-2,2.308,-98.54,2660.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-19D,TR164-19D-1G,2.123,-97.193,3338.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-18D,TR164-18D-2,2.288,-96.178,2865.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-17D,TR164-17D-1G,2.572,-94.87,2550.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-16D,TR164-16D-1G,2.562,-94.447,2380.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-14D,TR164-14D-1G,2.472,-93.758,2213.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-23D,"TR164-23D-1, TR164-23D-2G",2.292,-92.897,2115.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-12D,TR164-12D-1G,2.253,-92.685,1983.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-11D,TR164-11D-1G,2.085,-92.243,1815.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-24D,"TR164-24D-1, TR164-24D-3G",1.955,-91.395,1675.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-26D,"TR164-26D-4G, TR164-26D-3G",1.9,-90.95,2025.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-09D,"TR164-09D-3, TR164-09D-1G",0.932,-90.503,1555.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-07D,TR164-07D-2G,0.858,-89.9,1710.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-06D,"TR164-06D-1G, TR164-06D-2G",0.843,-89.588,1795.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-25D,"TR164-25D-1G, TR164-25D-2G",1.947,-91.18,1988.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-05D,TR164-05D-2G,0.782,-88.895,1775.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-04D,TR164-04D-1,0.747,-88.597,1880.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-03D,TR164-03D-1G,0.728,-88.235,1994.0,glass,at my hand (Katie Kelly),,,,,,
+TR164,TR164-01D,TR164-01D-2G,0.718,-87.863,2180.0,glass,at my hand (Katie Kelly),,,,,,
+DS,DS-D5,DS-D5G,2.44,-95.62,2743.0,glass,at my hand (Katie Kelly),,,,,,
+DS,DS-D3,DS-D3A,1.04,-85.42,1554.0,glass,at my hand (Katie Kelly),,,,,,
+DS,DS-D1,DS-D1Ag,0.71,-85.5,2377.0,glass,at my hand (Katie Kelly),,,,,,
+CTW,CTW-10D,CTW-10D-1G,1.99,-91.61,2016.0,glass,at my hand (Katie Kelly),,,,,,
+CTW,CTW-09D,CTW-09D-1G,0.78,-89.23,1811.0,glass,at my hand (Katie Kelly),,,,,,
+CTW,CTW-07D,CTW-07D-1G,0.87,-87.08,2808.0,glass,at my hand (Katie Kelly),,,,,,
+CTW,CTW-06D,CTW-06D-1G,0.852,-86.547,2381.0,glass,at my hand (Katie Kelly),,,,,,
+ST7,ST7-17D,ST7-17D-1G,0.82,-86.13,2500.0,glass,at my hand (Katie Kelly),lon listed as +86.13 (east) in the original spreadsheet; corrected to west 2026-09-29,,,,,
+ST7,ST7-07D,ST7-07D-1G,3.2,-83.04,2600.0,glass,at my hand (Katie Kelly),,,,,,
+NZ,NZ-06,NZ-06-06,2.236,-101.482,4900.0,glass,at my hand (Katie Kelly),,,,,,
+NA06x,NA063,NA063-014,0.75,-85.867,2597.5,glass,at my hand (Katie Kelly),,,,,,
+NA06x,NA063,NA063-002,0.767,-85.9,2562.0,glass,at my hand (Katie Kelly),lon listed as +85.9 (east) in the original spreadsheet; corrected to west 2026-09-29,,,,,
+NA06x,NA062-003,"NA062-003-04, NA062-004",0.767,-86.017,,glass,at my hand (Katie Kelly),,,,,,
+PLUME02,PL02-13,"PL02-13-24, PL02-13-25, PL02-13-27",0.07,-89.04,1365.0,glass,,,,,,,
+PLUME02,PL02-14,PL02-14-3,0.1,-89.09,1356.0,glass,at my hand (Karen Harpp),,,,,,
+PLUME02,PL02-14,PL02-14-8,0.07,-89.12,1365.0,glass,at my hand (Karen Harpp),,,,,,
+PLUME02,PL02-27,"PL02-27-1, PL02-27-17",0.88,-91.32,1557.0,glass,at my hand (Karen Harpp),,,,,,
+PLUME02,PL02-26,"PL02-26-16, PL02-26-21, PL02-26-25",0.83,-91.29,676.0,glass,at my hand (Karen Harpp),,,,,,
+PLUME02,PL02-26,PL02-26-7,0.84,-91.29,676.0,glass,,,,,,,
+PLUME02,PL02-28,"PL02-28-1, PL02-28-11",1.02,-91.55,1183.0,glass,,,,,,,
+PLUME02,PL02-29,PL02-29-3,1.9,-92.16,1723.0,glass,at my hand (Karen Harpp),,,,,,
+PLUME02,PL02-30,PL02-30-1,1.59,-91.92,2256.0,glass,at my hand (Karen Harpp),,,,,,
+SO158,DR69,DR69-7,0.58,-90.33,1193.0,glass,,,,,,,
+SO158,DR70,DR70-2,0.41,-89.87,1483.0,glass,at my hand (Kaj Hoernle),,,,,,
+SO158,DR71-A,DR71-A-1,0.45,-89.63,1450.0,glass,,,,,,,
+SO158,DR72,DR72-3,0.11,-89.29,1982.0,glass,,,,,,,
+SO158,DR72-A,DR72-A-1,0.09,-89.25,1441.0,glass,,,,,,,
+SO158,DR40,"DR40-1, DR40-3",0.98,-90.84,1560.0,glass,,,,,,,
+SO158,DR41-A,DR41-A-1,1.24,-91.12,445.0,glass,,,,,,,
+SO158,DR46-A,DR46-A-1,1.71,-91.19,2235.0,glass,at my hand (Kaj Hoernle),,,,,,
+SO158,DR47-A,DR47-A-1,1.89,-91.28,1603.0,glass,at my hand (Kaj Hoernle),,,,,,
+SO158,DR50,DR50-1,1.87,-91.7,2214.0,glass,,,,,,,
+SO158,DR58,DR58-2,1.949983,-92.11515,2304.0,glass,at my hand (Kaj Hoernle),,,,,,
+SO158,DR60,DR60-1,1.72,-91.72,1848.0,glass,,,,,,,
+SO158,DR62,DR62-2,1.19,-91.69,2038.0,glass,at my hand (Kaj Hoernle),,,,,,
+SO158,DR65,DR65-1,0.89,-91.42,1493.0,glass,,,,,,,
+SO158,DR68,"DR68-3, DR68-4",0.86,-90.84,1561.0,glass,,,,,,,
