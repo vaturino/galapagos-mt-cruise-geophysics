@@ -64,6 +64,19 @@ def read_old_style_grd(path):
 
     if fill is not None:
         z = np.where(z == np.float32(fill), np.nan, z)
+
+    # BUG FIX (2026-09-29): the classic GMT "old-style surface" z array is
+    # stored scanning from the NORTHWEST corner (west->east, then
+    # north->south) -- i.e. flat index 0 is the NORTHERNMOST row -- but `y`
+    # above is generated ASCENDING (south-to-north, y_range[0] = south).
+    # A naive z.reshape(ny, nx) therefore pairs z's row 0 (north) with y[0]
+    # (south): every old-style grid this function reads comes out upside
+    # down relative to its own y array unless corrected here. Verified by
+    # cross-correlating several affected files (AT50-09BC platform tiles,
+    # DRFT04RR line files) against the known-good GMRT_corridor_basemap.grd:
+    # correlation was ~0.0-0.4 (often even sign-flipped/anti-correlated)
+    # before this fix and >0.99 after it.
+    z = z[::-1, :]
     return x, y, z
 
 
