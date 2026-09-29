@@ -41,8 +41,19 @@ folder.
   were. Marker **shape** comes from the file name, not a column: a name
   containing "dredge" plots as a plain circle, a name containing "mt" (e.g.
   `MTsites.csv`) plots as a diamond; anything else defaults to a circle.
-  Marker **colour** comes from each row's `status` column: `to do` is
-  orange, `done` (or anything else/blank) is grey.
+  Marker **colour** comes from each row's `status` and `site` columns: a
+  `done` point (or anything else/blank) is always flat grey; a `to do`
+  point is coloured by its own `site` number along a ramp -- dredge runs
+  white -> vivid green, MT runs yellow -> red -- normalised against the
+  min/max `site` actually present in that file. (`TRACK_ORDER_RAMPS` in
+  app.js is where these live; a few other colour combinations were tried
+  first and are worth a look if either of these stops working for the
+  actual data.) Every marker also has a 3px white halo behind its
+  dark-rimmed fill for extra contrast against the basemap. The legend
+  shows both ramps with the loaded min/max site range. Hovering (or
+  clicking, e.g. on a trackpad) a point shows its label -- "MT acquisition
+  point *n*" or "Dredge point *n*" -- using its
+  `site` number.
 
 ## What's identical
 

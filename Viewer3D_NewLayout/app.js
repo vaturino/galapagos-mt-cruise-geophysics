@@ -126,8 +126,7 @@ const state = {
   camera: { heading: 0, pitch: -35, rangeScale: 2.2 }, // heading/pitch in degrees
   trackPoints: [], // flattened points from every VISIBLE entry in trackLayers -- rebuilt by rebuildVisibleTrackPoints()
   trackLayers: new Map(), // fileName -> { fileName, kind, points: [...], visible }, one entry per loaded CSV
-  trackPointCollection: null, // Cesium.PointPrimitiveCollection -- "dredge" points (plain circles)
-  trackBillboardCollection: null, // Cesium.BillboardCollection -- "mt" points (diamond icon, no other shape option on a PointPrimitive)
+  trackBillboardCollection: null, // Cesium.BillboardCollection -- both "dredge" (circle) and "mt" (diamond) points, drawn as haloed canvas icons
   crossSection: {
     armed: false, // true while waiting for the next surface click to place A or B
     pointA: null, // { lonDeg, latDeg, cartesian }
@@ -965,23 +964,52 @@ function updateLegend() {
 // Track points (CSV upload, placed on the current seafloor surface)
 // =====================================================================
 
-// Status -> colour: just two states, "to do" (still outstanding) and "done"
-// (grey, deliberately -- greyed-out reads as complete/inactive at a glance).
-// One validated slot from the standard categorical theme for "to do"; an
-// unrecognised status value reads the same as "done" rather than getting a
-// third colour, since "not one of the two we track" and "done" both mean
-// "not something to act on right now". Keys are lower-cased for matching
-// against the CSV.
-const TRACK_STATUS_COLORS = [
-  { key: "to do", hex: "#eb6834" }, // orange -- still outstanding
-  { key: "done", hex: "#9aa7b2" }, // grey -- completed
-];
-const TRACK_STATUS_FALLBACK_HEX = "#9aa7b2"; // same grey as "done" -- missing/unrecognised status
-const TRACK_STATUS_LOOKUP = new Map(TRACK_STATUS_COLORS.map((s) => [s.key, s.hex]));
+// Colour: "done" is always the same flat grey (reads as complete/inactive
+// at a glance, regardless of type). "to do" is coloured by SEQUENCE -- each
+// type gets its own light-to-dark ramp, one hue family per type so dredge
+// and MT never share a colour, and position within the ramp comes directly
+// from the CSV's own "site" column (not row order or a recomputed index).
+// Blue vs. orange is a safe pairing for colour-vision deficiency too, since
+// the two also separate by lightness, not hue alone.
+const TRACK_DONE_HEX = "#9aa7b2"; // grey -- completed, or status missing/unrecognised
+const TRACK_ORDER_RAMPS = {
+  dredge: { stops: ["#ffffff", "#00701a"] }, // white -> deep green: low site number -> high
+  mt: { stops: ["#fff200", "#d0021b"] }, // yellow -> red: low site number -> high
+};
 
-function trackStatusColor(status) {
-  if (!status) return TRACK_STATUS_FALLBACK_HEX;
-  return TRACK_STATUS_LOOKUP.get(status.trim().toLowerCase()) || TRACK_STATUS_FALLBACK_HEX;
+function lerpHex(hexA, hexB, t) {
+  const [ar, ag, ab] = hexToRgb(hexA);
+  const [br, bg, bb] = hexToRgb(hexB);
+  const r = Math.round(ar + (br - ar) * t);
+  const g = Math.round(ag + (bg - ag) * t);
+  const b = Math.round(ab + (bb - ab) * t);
+  const toHex = (n) => Math.max(0, Math.min(255, n)).toString(16).padStart(2, "0");
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+// Walks a >=2-stop ramp as a piecewise gradient (evenly spaced segments) --
+// a 2-stop ramp is just the 1-segment case, so this covers both dredge and
+// the 3-stop MT ramp with one code path.
+function multiStopHex(stops, t) {
+  if (stops.length === 1) return stops[0];
+  const segments = stops.length - 1;
+  const scaled = Math.min(segments - 1e-9, Math.max(0, t * segments));
+  const i = Math.floor(scaled);
+  return lerpHex(stops[i], stops[i + 1], scaled - i);
+}
+
+// pt carries siteNum plus that CSV's own minOrder/maxOrder (see parseTrackCSV) --
+// denormalised onto every point at parse time so this function needs nothing
+// beyond the point itself.
+function trackPointColor(pt) {
+  const status = pt.status ? pt.status.trim().toLowerCase() : "";
+  if (status !== "to do") return TRACK_DONE_HEX; // "done", blank, or unrecognised
+  const ramp = TRACK_ORDER_RAMPS[pt.kind] || TRACK_ORDER_RAMPS.dredge;
+  if (!Number.isFinite(pt.siteNum) || pt.minOrder == null || pt.maxOrder == null || pt.maxOrder === pt.minOrder) {
+    return ramp.stops[ramp.stops.length - 1]; // no usable "site" number to place this on the ramp -- just use the family's darkest colour
+  }
+  const t = Math.min(1, Math.max(0, (pt.siteNum - pt.minOrder) / (pt.maxOrder - pt.minOrder)));
+  return multiStopHex(ramp.stops, t);
 }
 
 // Marker SHAPE is decided by the uploaded file's own name, not a CSV column
@@ -1000,34 +1028,51 @@ function detectTrackKind(filename) {
   return "dredge"; // unrecognised filename -- default to the plain circle marker
 }
 
-// Cesium's PointPrimitiveCollection (used for "dredge" points, below) only
-// ever renders a circle -- there's no shape option on it. A genuinely
-// different "MT" marker needs a Billboard with a hand-drawn icon instead.
-// Drawn once per status colour and cached (a handful of colours total, not
-// one canvas per point).
-const trackDiamondIconCache = new Map();
-function getTrackDiamondIcon(hex) {
-  if (trackDiamondIconCache.has(hex)) return trackDiamondIconCache.get(hex);
+// Both marker shapes are hand-drawn canvas icons (not a Cesium
+// PointPrimitive's built-in circle) so "dredge"/"mt" can each get a genuine
+// shape AND the same halo treatment: a white ring behind a colour-filled,
+// dark-rimmed shape. The white ring is what keeps a point visible however
+// the basemap underneath is coloured -- a flat colour + dark outline alone
+// (the previous approach) washed out against ocean blues close to the
+// marker's own hue. Drawn once per shape+colour combination and cached.
+const trackIconCache = new Map();
+function getTrackIcon(shape, hex) {
+  const key = `${shape}:${hex}`;
+  if (trackIconCache.has(key)) return trackIconCache.get(key);
   const size = 20;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
   const mid = size / 2;
-  const r = size / 2 - 2;
-  ctx.beginPath();
-  ctx.moveTo(mid, mid - r);
-  ctx.lineTo(mid + r, mid);
-  ctx.lineTo(mid, mid + r);
-  ctx.lineTo(mid - r, mid);
-  ctx.closePath();
+  const rOuter = size / 2 - 1; // white halo
+  const rInner = rOuter - 3; // coloured fill, inset inside the halo
+
+  const pathFor = (r) => {
+    ctx.beginPath();
+    if (shape === "diamond") {
+      ctx.moveTo(mid, mid - r);
+      ctx.lineTo(mid + r, mid);
+      ctx.lineTo(mid, mid + r);
+      ctx.lineTo(mid - r, mid);
+      ctx.closePath();
+    } else {
+      ctx.arc(mid, mid, r, 0, Math.PI * 2);
+    }
+  };
+
+  pathFor(rOuter);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+
+  pathFor(rInner);
   ctx.fillStyle = hex;
   ctx.fill();
-  // dark outline, matching the circle markers' outline treatment
-  ctx.lineWidth = 1.5;
+  ctx.lineWidth = 1.2;
   ctx.strokeStyle = "#0b0b0b";
   ctx.stroke();
-  trackDiamondIconCache.set(hex, canvas);
+
+  trackIconCache.set(key, canvas);
   return canvas;
 }
 
@@ -1071,27 +1116,63 @@ function buildTrackLayerRows() {
   }
 }
 
+// Loaded (not necessarily visible) min/max "site" number for one kind,
+// across every currently loaded file of that kind -- drives the gradient
+// legend's range label, e.g. "MT (site 1\u21925)".
+function getTrackKindOrderRange(kind) {
+  let min = null;
+  let max = null;
+  for (const layer of state.trackLayers.values()) {
+    if (layer.kind !== kind) continue;
+    for (const p of layer.points) {
+      if (!Number.isFinite(p.siteNum)) continue;
+      if (min === null || p.siteNum < min) min = p.siteNum;
+      if (max === null || p.siteNum > max) max = p.siteNum;
+    }
+  }
+  return { min, max };
+}
+
 function buildTrackLegend() {
   const container = document.getElementById("trackLegend");
   if (!container) return;
   container.innerHTML = "";
 
-  const statusHeading = document.createElement("div");
-  statusHeading.className = "track-legend-heading";
-  statusHeading.textContent = "Status";
-  container.appendChild(statusHeading);
-  for (const { key, hex } of TRACK_STATUS_COLORS) {
+  const todoHeading = document.createElement("div");
+  todoHeading.className = "track-legend-heading";
+  todoHeading.textContent = "To do (colour = site order)";
+  container.appendChild(todoHeading);
+  const gradientRows = [
+    { kind: "dredge", gradientClass: "gradient-dredge", label: "Dredge" },
+    { kind: "mt", gradientClass: "gradient-mt", label: "MT" },
+  ];
+  for (const { kind, gradientClass, label } of gradientRows) {
+    const { min, max } = getTrackKindOrderRange(kind);
     const row = document.createElement("div");
     row.className = "track-legend-row";
     const swatch = document.createElement("span");
-    swatch.className = "track-legend-swatch";
-    swatch.style.background = hex;
-    const label = document.createElement("span");
-    label.textContent = key.replace(/^\w/, (c) => c.toUpperCase());
+    swatch.className = `track-legend-swatch track-legend-swatch--${gradientClass}`;
+    const labelEl = document.createElement("span");
+    labelEl.textContent = min !== null && max !== null ? `${label} (site ${min}\u2192${max})` : `${label} (none loaded)`;
     row.appendChild(swatch);
-    row.appendChild(label);
+    row.appendChild(labelEl);
     container.appendChild(row);
   }
+
+  const doneHeading = document.createElement("div");
+  doneHeading.className = "track-legend-heading";
+  doneHeading.textContent = "Done";
+  container.appendChild(doneHeading);
+  const doneRow = document.createElement("div");
+  doneRow.className = "track-legend-row";
+  const doneSwatch = document.createElement("span");
+  doneSwatch.className = "track-legend-swatch";
+  doneSwatch.style.background = TRACK_DONE_HEX;
+  const doneLabel = document.createElement("span");
+  doneLabel.textContent = "Done (any type)";
+  doneRow.appendChild(doneSwatch);
+  doneRow.appendChild(doneLabel);
+  container.appendChild(doneRow);
 
   const typeHeading = document.createElement("div");
   typeHeading.className = "track-legend-heading";
@@ -1125,8 +1206,12 @@ function parseTrackCSV(text, kind) {
   const header = splitLine(lines[0]).map((h) => h.toLowerCase());
   let latIdx = header.findIndex((h) => h.includes("lat"));
   let lonIdx = header.findIndex((h) => h.includes("lon"));
-  let labelIdx = header.findIndex((h) => ["name", "label", "id", "station"].some((k) => h.includes(k)));
+  let labelIdx = header.findIndex((h) => ["name", "label", "id", "station", "site"].some((k) => h.includes(k)));
   let statusIdx = header.findIndex((h) => ["status", "task", "activity"].some((k) => h.includes(k)));
+  // Colour-by-order needs the CSV's own "site" number specifically, not
+  // just whatever ends up as the display label -- kept separate from
+  // labelIdx above even though "site" also satisfies that search.
+  let orderIdx = header.findIndex((h) => h.includes("site"));
   let startRow = 1;
   let warning = null;
   if (latIdx === -1 || lonIdx === -1) {
@@ -1134,21 +1219,34 @@ function parseTrackCSV(text, kind) {
     lonIdx = 1;
     labelIdx = -1;
     statusIdx = -1;
+    orderIdx = -1;
     startRow = 0;
     warning = 'No lat/lon header recognised -- assumed column 1 = latitude, column 2 = longitude.';
   }
 
   const points = [];
   const unrecognisedStatuses = new Set();
+  const RECOGNISED_STATUSES = new Set(["to do", "done"]);
   for (let i = startRow; i < lines.length; i++) {
     const cols = splitLine(lines[i]);
     const lat = parseFloat(cols[latIdx]);
     const lon = parseFloat(cols[lonIdx]);
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
     const label = labelIdx >= 0 && cols[labelIdx] ? cols[labelIdx] : `pt${points.length + 1}`;
+    const siteNum = orderIdx >= 0 ? parseFloat(cols[orderIdx]) : NaN;
     const status = statusIdx >= 0 && cols[statusIdx] ? cols[statusIdx] : null;
-    if (status && !TRACK_STATUS_LOOKUP.has(status.trim().toLowerCase())) unrecognisedStatuses.add(status);
-    points.push({ latDeg: lat, lonDeg: lon, label, status, kind });
+    if (status && !RECOGNISED_STATUSES.has(status.trim().toLowerCase())) unrecognisedStatuses.add(status);
+    points.push({ latDeg: lat, lonDeg: lon, label, status, kind, siteNum });
+  }
+  // Denormalise this file's own min/max "site" number onto every point so
+  // trackPointColor() and the legend can place things on the ramp without
+  // re-scanning the file -- normalised per file, not across every CSV loaded.
+  const siteNums = points.map((p) => p.siteNum).filter(Number.isFinite);
+  const minOrder = siteNums.length > 0 ? Math.min(...siteNums) : null;
+  const maxOrder = siteNums.length > 0 ? Math.max(...siteNums) : null;
+  for (const p of points) {
+    p.minOrder = minOrder;
+    p.maxOrder = maxOrder;
   }
   if (unrecognisedStatuses.size > 0) {
     const extra = `Status value(s) not recognised (shown in grey, same as "done"): ${[...unrecognisedStatuses].slice(0, 4).join(", ")}${unrecognisedStatuses.size > 4 ? ", …" : ""}. Expected "to do" or "done".`;
@@ -1158,13 +1256,9 @@ function parseTrackCSV(text, kind) {
 }
 
 function placeTrackPoints() {
-  if (!state.trackPointCollection) {
-    state.trackPointCollection = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
-  }
   if (!state.trackBillboardCollection) {
     state.trackBillboardCollection = viewer.scene.primitives.add(new Cesium.BillboardCollection());
   }
-  state.trackPointCollection.removeAll();
   state.trackBillboardCollection.removeAll();
   const statusEl = document.getElementById("trackStatus");
   if (state.trackPoints.length === 0) {
@@ -1194,27 +1288,15 @@ function placeTrackPoints() {
     }
     carto.height = height;
     pt.cartesian = Cesium.Cartographic.toCartesian(carto);
-    const hex = trackStatusColor(pt.status);
-    if (pt.kind === "mt") {
-      state.trackBillboardCollection.add({
-        position: pt.cartesian,
-        image: getTrackDiamondIcon(hex),
-        width: 14,
-        height: 14,
-      });
-    } else {
-      state.trackPointCollection.add({
-        position: pt.cartesian,
-        color: Cesium.Color.fromCssColorString(hex),
-        // a dark outline (rather than white) keeps every status colour legible
-        // against both the pale land palette and the bright shallow-water blue
-        // in the basemap underneath -- white washed out on the lightest
-        // terrain colours during testing.
-        outlineColor: Cesium.Color.fromCssColorString("#0b0b0b"),
-        outlineWidth: 1.5,
-        pixelSize: 9,
-      });
-    }
+    const hex = trackPointColor(pt);
+    const shape = pt.kind === "mt" ? "diamond" : "circle";
+    state.trackBillboardCollection.add({
+      position: pt.cartesian,
+      image: getTrackIcon(shape, hex),
+      width: 16,
+      height: 16,
+      id: pt,
+    });
     placed += 1;
   }
   viewer.scene.requestRender();
@@ -1227,6 +1309,43 @@ function placeTrackPoints() {
     statusEl.textContent = text;
   }
 }
+
+// pt objects (see parseTrackCSV) are attached as the `id` of each billboard
+// / point primitive in placeTrackPoints() above, so scene.pick() hands them
+// straight back.
+function trackTooltipLabel(pt) {
+  const num = Number.isFinite(pt.siteNum) ? pt.siteNum : pt.label;
+  return pt.kind === "mt" ? `MT acquisition point ${num}` : `Dredge point ${num}`;
+}
+function showTrackTooltip(pt, windowPosition) {
+  const el = document.getElementById("trackTooltip");
+  if (!el) return;
+  el.textContent = trackTooltipLabel(pt);
+  el.style.left = `${windowPosition.x + 14}px`;
+  el.style.top = `${windowPosition.y + 14}px`;
+  el.style.display = "block";
+}
+function hideTrackTooltip() {
+  const el = document.getElementById("trackTooltip");
+  if (el) el.style.display = "none";
+}
+function pickTrackPoint(windowPosition) {
+  const picked = viewer.scene.pick(windowPosition);
+  if (Cesium.defined(picked) && picked.id && typeof picked.id === "object" && "kind" in picked.id && "latDeg" in picked.id) {
+    return picked.id;
+  }
+  return null;
+}
+const trackPickHandler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+trackPickHandler.setInputAction((movement) => {
+  const pt = pickTrackPoint(movement.endPosition);
+  if (pt) showTrackTooltip(pt, movement.endPosition);
+  else hideTrackTooltip();
+}, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+trackPickHandler.setInputAction((movement) => {
+  const pt = pickTrackPoint(movement.position);
+  if (pt) showTrackTooltip(pt, movement.position);
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 document.getElementById("trackCsvInput").addEventListener("change", async (e) => {
   const files = Array.from(e.target.files || []);
@@ -1246,6 +1365,7 @@ document.getElementById("trackCsvInput").addEventListener("change", async (e) =>
   }
   e.target.value = ""; // allow re-selecting the same file name later to reload it
   buildTrackLayerRows();
+  buildTrackLegend();
   rebuildVisibleTrackPoints();
   if (statusEl) statusEl.textContent = perFileNotes.join(" ");
   placeTrackPoints();
@@ -1254,11 +1374,12 @@ document.getElementById("trackCsvInput").addEventListener("change", async (e) =>
 document.getElementById("clearTrackBtn").addEventListener("click", () => {
   state.trackLayers.clear();
   state.trackPoints = [];
-  if (state.trackPointCollection) state.trackPointCollection.removeAll();
   if (state.trackBillboardCollection) state.trackBillboardCollection.removeAll();
   document.getElementById("trackStatus").textContent = "";
   document.getElementById("trackCsvInput").value = "";
   buildTrackLayerRows();
+  buildTrackLegend();
+  hideTrackTooltip();
   viewer.scene.requestRender();
 });
 
@@ -2525,7 +2646,7 @@ async function exportGeoTiff() {
       // Outside the (possibly select-region-clipped) export bbox entirely --
       // don't count it as stamped, matching what the raster actually shows.
       if (outCol < -2 || outCol >= outW + 2 || outRow < -2 || outRow >= outH + 2) continue;
-      const [pr, pg, pb] = hexToRgb(trackStatusColor(pt.status));
+      const [pr, pg, pb] = hexToRgb(trackPointColor(pt));
       for (let dr = -2; dr <= 2; dr++) {
         for (let dc = -2; dc <= 2; dc++) {
           const rr = outRow + dr;

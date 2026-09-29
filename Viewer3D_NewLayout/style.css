@@ -499,6 +499,42 @@ input[type="range"] {
   margin-top: 0;
 }
 
+/* Order-colourbar legend swatches -- same light->dark stops as
+   TRACK_ORDER_RAMPS in app.js. A wider rounded bar reads as a ramp, unlike
+   the round/shape swatches above it. */
+.track-legend-swatch--gradient-dredge,
+.track-legend-swatch--gradient-mt {
+  width: 34px;
+  height: 11px;
+  min-width: 34px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+}
+
+.track-legend-swatch--gradient-dredge {
+  background: linear-gradient(to right, #ffffff, #00701a);
+}
+
+.track-legend-swatch--gradient-mt {
+  background: linear-gradient(to right, #fff200, #d0021b);
+}
+
+.track-tooltip {
+  position: absolute;
+  display: none;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 20;
+  background: rgba(11, 15, 22, 0.94);
+  color: #eef1f4;
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  white-space: nowrap;
+}
+
 #loading {
   position: absolute;
   inset: 0;
