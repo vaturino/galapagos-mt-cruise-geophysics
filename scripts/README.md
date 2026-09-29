@@ -61,6 +61,13 @@ are **not** one fixed pipeline you run start-to-finish — they're a toolbox,
 and which ones you need depends on what you're trying to do. Pick the job
 below that matches, and run only that numbered list.
 
+**Every command below runs through the venv** — `venv/bin/python3
+<script>.py` (`venv\Scripts\python.exe` on Windows), not a bare `python3`,
+and not after `source venv/bin/activate` first. See "One-time setup" above
+for why `source activate` specifically is the one thing to avoid. The two
+exceptions, called out where they come up, are `extract_geomapapp_layers.py`
+and `run_viewer.py` — both stdlib-only, no venv needed at all.
+
 ### Job A — I just want to open the 3D viewer and look at the data
 
 Nothing to run. The viewer's data is already built.
@@ -82,24 +89,25 @@ GeoMapApp will open it — see `DATA_MANIFEST.md` and
    script you need next:
    - Came from **MGDS** (old-style GMT `x_range`/`y_range`/`z_range`, modern
      `x`/`y`/`z` with 0–360° longitude, or ESRI ASCII `.asc`) →
-     **`fix_mgds_grid.py`**. This is the general-purpose fixer; prefer it
+     `venv/bin/python3 fix_mgds_grid.py`. This is the general-purpose fixer; prefer it
      over the two narrower/older scripts below for any *new* pull.
    - Came from **GMRT's GridServer** (`lon`/`lat`/`altitude` variables) →
-     **`gmrt_to_xyz.py`** (rename only, no value changes), or
-     **`grd_to_float32.py`** first if you also want to roughly halve the
+     `venv/bin/python3 gmrt_to_xyz.py` (rename only, no value changes), or
+     `venv/bin/python3 grd_to_float32.py` first if you also want to roughly halve the
      file size (downcast float64 → float32) before renaming.
    - An **old-style GMT grid in a projected/UTM CRS** (rare — only needed
-     for old MATLAB-`write_gmt`-style files) → `gmt_grd_to_geotiff.py`.
-   - A **plain ASCII lon/lat/value text file** → `ascii_xyz_to_grd.py`
+     for old MATLAB-`write_gmt`-style files) → `venv/bin/python3 gmt_grd_to_geotiff.py`.
+   - A **plain ASCII lon/lat/value text file** → `venv/bin/python3 ascii_xyz_to_grd.py`
      (writes a `.grd` if the points form a regular grid, otherwise a clean
      CSV, e.g. for a ship-track gravimeter/magnetometer log).
 2. *(optional)* Merging many per-line/per-tile files from one survey into a
-   single importable grid → **`build_geomapapp_mosaics.py`** for a
+   single importable grid → `venv/bin/python3 build_geomapapp_mosaics.py` for a
    `GMRT_regional/`-style dataset folder (see its own caveat below — it's a
    template more than a drop-in tool at this point), or the older
-   **`mosaic_geomapapp_grids.py`** for a folder of per-survey-line grids.
-3. Confirm it worked: **`inspect_gmrt.py`** / **`validate_gmrt.py`** (before
-   renaming) or **`validate_xyz.py`** (after) — read-only, safe to run on
+   `venv/bin/python3 mosaic_geomapapp_grids.py` for a folder of per-survey-line grids.
+3. Confirm it worked: `venv/bin/python3 inspect_gmrt.py` / `venv/bin/python3
+   validate_gmrt.py` (before renaming) or `venv/bin/python3 validate_xyz.py`
+   (after) — read-only, safe to run on
    anything, any time.
 4. Open the output `.grd`/`.tif` in GeoMapApp. If it still won't import,
    check the variable names are `x`/`y`/`z` specifically — GeoMapApp's
@@ -110,21 +118,21 @@ GeoMapApp will open it — see `DATA_MANIFEST.md` and
 
 1. Get the source grid/GeoTIFF ready first:
    - If it's a **projected CRS GeoTIFF** (e.g. UTM), reproject to EPSG:4326
-     first — **`crop_reproject_doa_etp.py`** (change `SRC`/`DST`/the bbox;
+     first — `venv/bin/python3 crop_reproject_doa_etp.py` (change `SRC`/`DST`/the bbox;
      the pattern generalizes beyond its original DOA-ETP use case).
    - If it's a **bathymetry grid with known bad-data spikes** (this has come
      up twice already, in two unrelated datasets — see "Known data-quality
      issues" in [`Viewer3D/README.md`](../Viewer3D/README.md)) → run the
-     relevant one-off fixer first: `fix_gmrt_spikes.py` or
-     `fix_mittelstaedt_bath_spikes.py`. Only relevant to those two specific
+     relevant one-off fixer first: `venv/bin/python3 fix_gmrt_spikes.py` or
+     `venv/bin/python3 fix_mittelstaedt_bath_spikes.py`. Only relevant to those two specific
      files unless a new dataset turns out to have the same problem.
    - Otherwise a `.grd` (classic NetCDF3 *or* GMT's newer NetCDF4/HDF5
      variant — auto-detected, no flag needed) or an EPSG:4326 GeoTIFF can go
      straight into the next step.
 2. Build the mesh:
-   - **Bathymetry/backscatter** → **`build_cesium_mesh.py`**
+   - **Bathymetry/backscatter** → `venv/bin/python3 build_cesium_mesh.py`
    - **Geophysics** (gravity, magnetics, etc., draped over existing terrain)
-     → **`build_geophysics_drape.py`**
+     → `venv/bin/python3 build_geophysics_drape.py`
    - Both write straight into `Viewer3D/data/` and register themselves in
      `Viewer3D/data/manifest.json` — full flag reference in
      [`Viewer3D/README.md`](../Viewer3D/README.md).
