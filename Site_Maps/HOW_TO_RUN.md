@@ -59,11 +59,11 @@ Then copy the results into this Permits folder (step 5).
 **⚠ Use the right basemap** (md5 `92e3497ce3fca61b26e84183cb972a28`).
 An older version (md5 `a0fdca3d…`) has only the Wolf/Darwin spikes removed,
 so maps made from it show the bad 3-7 km spikes in Colombia/Ecuador/Panama.
-The Datasets drive had that older version until 2026-09-29. It was then
-replaced with the correct file; the old one is kept as
-`GMRT_corridor_basemap_clean_OLD_wolfdarwin_only.grd`. To rebuild the
-correct grid from scratch, run from the repo's `scripts/` folder with the
-repo venv:
+The Datasets drive still has that older version in place (left untouched
+on purpose). The correct file is in
+`/media/tmittal/Datasets/UPDATE_2026-09-29_spikefix_sitemaps_permit-dredges/GMRT_regional/GMRT_Basemap/`.
+To rebuild the correct grid from scratch, run from the repo's `scripts/`
+folder with the repo venv:
 
 ```bash
 venv/bin/python3 fetch_copernicus_reference.py   # needs internet once (~1 min)
