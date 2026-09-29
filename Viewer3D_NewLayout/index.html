@@ -88,7 +88,8 @@
       <div class="track-buttons">
         <button id="clearTrackBtn">Clear points</button>
       </div>
-      <div id="trackStatus" class="hint-text">Select one or more CSVs at once (e.g. MTsites.csv + DredgeSites.csv from MT_dredging_coords/) -- lat/lon columns required, status column optional. Marker shape comes from the file name ("dredge"/"mt"); colour comes from status. Points snap onto the currently-visible seafloor surface.</div>
+      <div id="trackLayerList" class="ds-section-list"></div>
+      <div id="trackStatus" class="hint-text">Select one or more CSVs at once (e.g. MTsites.csv + DredgeSites.csv from MT_dredging_coords/) -- lat/lon columns required, status column optional. Each file becomes its own row above with a checkbox, like the dataset layers -- loading a new file adds it alongside what's already there; loading the same file name again replaces just that one. Marker shape comes from the file name ("dredge"/"mt"); colour comes from status. Points snap onto the currently-visible seafloor surface.</div>
       <div id="trackLegend" class="track-legend"></div>
     </div>
 

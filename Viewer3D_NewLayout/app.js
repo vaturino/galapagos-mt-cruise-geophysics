@@ -124,7 +124,8 @@ const state = {
   colorMode: "depth",
   lightingEnabled: true,
   camera: { heading: 0, pitch: -35, rangeScale: 2.2 }, // heading/pitch in degrees
-  trackPoints: [], // { lonDeg, latDeg, label, status, kind, cartesian }
+  trackPoints: [], // flattened points from every VISIBLE entry in trackLayers -- rebuilt by rebuildVisibleTrackPoints()
+  trackLayers: new Map(), // fileName -> { fileName, kind, points: [...], visible }, one entry per loaded CSV
   trackPointCollection: null, // Cesium.PointPrimitiveCollection -- "dredge" points (plain circles)
   trackBillboardCollection: null, // Cesium.BillboardCollection -- "mt" points (diamond icon, no other shape option on a PointPrimitive)
   crossSection: {
@@ -992,7 +993,10 @@ function trackStatusColor(status) {
 function detectTrackKind(filename) {
   const name = filename.toLowerCase();
   if (name.includes("dredge")) return "dredge";
-  if (/(^|[^a-z])mt([^a-z]|$)/.test(name)) return "mt";
+  // Plain substring, not a word-boundary match -- real file names here are
+  // "MTsites.csv" / "MT_....csv", i.e. "mt" immediately followed by more
+  // letters, which a stricter \bmt\b-style check would (and did) miss.
+  if (name.includes("mt")) return "mt";
   return "dredge"; // unrecognised filename -- default to the plain circle marker
 }
 
@@ -1030,6 +1034,41 @@ function getTrackDiamondIcon(hex) {
 function hexToRgb(hex) {
   const h = hex.replace("#", "");
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
+}
+
+function rebuildVisibleTrackPoints() {
+  const pts = [];
+  for (const layer of state.trackLayers.values()) {
+    if (!layer.visible) continue;
+    pts.push(...layer.points);
+  }
+  state.trackPoints = pts;
+}
+
+// One row per loaded CSV, same look as the dataset checklist (.ds-row/.ds-label/.ds-meta)
+// -- a checkbox toggles that file's points on/off without re-uploading it.
+function buildTrackLayerRows() {
+  const container = document.getElementById("trackLayerList");
+  if (!container) return;
+  container.innerHTML = "";
+  for (const layer of state.trackLayers.values()) {
+    const row = document.createElement("div");
+    row.className = "ds-row";
+    const kindLabel = layer.kind === "mt" ? "MT \u2014 diamond" : "Dredge \u2014 circle";
+    row.innerHTML = `
+      <label>
+        <input type="checkbox" ${layer.visible ? "checked" : ""}>
+        <span class="ds-label">${layer.fileName}</span>
+      </label>
+      <div class="ds-meta">${layer.points.length} point(s) \u2014 ${kindLabel}</div>
+    `;
+    row.querySelector("input").addEventListener("change", (e) => {
+      layer.visible = e.target.checked;
+      rebuildVisibleTrackPoints();
+      placeTrackPoints();
+    });
+    container.appendChild(row);
+  }
 }
 
 function buildTrackLegend() {
@@ -1193,28 +1232,33 @@ document.getElementById("trackCsvInput").addEventListener("change", async (e) =>
   const files = Array.from(e.target.files || []);
   if (files.length === 0) return;
   const statusEl = document.getElementById("trackStatus");
-  const allPoints = [];
   const perFileNotes = [];
   for (const file of files) {
     const text = await file.text();
     const kind = detectTrackKind(file.name);
     const { points, warning } = parseTrackCSV(text, kind);
-    allPoints.push(...points);
+    // Keyed by file name: loading a new file name ADDS a new toggleable
+    // entry alongside whatever's already loaded (e.g. MT then Dredge later
+    // still shows both); re-loading the same file name replaces just that
+    // one entry rather than duplicating it.
+    state.trackLayers.set(file.name, { fileName: file.name, kind, points, visible: true });
     perFileNotes.push(warning ? `${file.name}: ${warning}` : `${file.name}: ${points.length} point(s) (${kind}).`);
   }
-  // Selecting a new set of files replaces whatever was loaded before --
-  // select every CSV you want visible together in one file-picker dialog.
-  state.trackPoints = allPoints;
+  e.target.value = ""; // allow re-selecting the same file name later to reload it
+  buildTrackLayerRows();
+  rebuildVisibleTrackPoints();
   if (statusEl) statusEl.textContent = perFileNotes.join(" ");
   placeTrackPoints();
 });
 
 document.getElementById("clearTrackBtn").addEventListener("click", () => {
+  state.trackLayers.clear();
   state.trackPoints = [];
   if (state.trackPointCollection) state.trackPointCollection.removeAll();
   if (state.trackBillboardCollection) state.trackBillboardCollection.removeAll();
   document.getElementById("trackStatus").textContent = "";
   document.getElementById("trackCsvInput").value = "";
+  buildTrackLayerRows();
   viewer.scene.requestRender();
 });
 

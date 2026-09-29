@@ -29,18 +29,20 @@ folder.
   colourbar puts it back to the full data range. This also means a GeoTIFF
   colour export picks up whatever window is currently set, since it's
   drawn from the same re-tinted mesh colours.
-- **Track points: multi-file upload, shaped by site type.** The "Track
-  points" panel's file picker now takes more than one CSV at once (hold
-  Ctrl/Cmd, or drag-select, in the file dialog) -- select
+- **Track points: multi-file upload, one toggleable row per file, shaped by
+  site type.** The "Track points" panel's file picker takes more than one
+  CSV at once (hold Ctrl/Cmd, or drag-select, in the file dialog) -- select
   `MT_dredging_coords/MTsites.csv` and `DredgeSites.csv` together, for
-  example, and both show up at the same time. Marker **shape** comes from
-  the file name, not a column: a file name containing "dredge" plots as a
-  plain circle, a file name containing "mt" (as a whole word, e.g.
+  example, and both show up. Each loaded file gets its own row (file name,
+  point count, type) with a checkbox, in the same style as the dataset
+  layer list -- toggle a file on/off without re-uploading it. Loading a new
+  file name adds it alongside whatever's already loaded; loading the same
+  file name again replaces just that one entry, keeping the others as they
+  were. Marker **shape** comes from the file name, not a column: a name
+  containing "dredge" plots as a plain circle, a name containing "mt" (e.g.
   `MTsites.csv`) plots as a diamond; anything else defaults to a circle.
   Marker **colour** comes from each row's `status` column: `to do` is
-  orange, `done` (or anything else/blank) is grey. Selecting a new set of
-  files replaces whatever was loaded before, same as the original
-  single-file behaviour.
+  orange, `done` (or anything else/blank) is grey.
 
 ## What's identical
 
