@@ -15,7 +15,8 @@ import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 
-from make_site_maps import HERE, PC, RES, SITES, basemap, haversine_km, load_gmrt, reserves, scalebar
+from make_site_maps import (HERE, PC, RES, SITES, bathy, colorbar, haversine_km, load_gmrt, reserves, scalebar,
+                            site_depth_range)
 
 PERMIT_CSV = "/home/tmittal/Dropbox/Work_AI/Permits/1_Dredging/3_sites/Combined_Cruise_Sites_Dredge.csv"
 
@@ -36,11 +37,12 @@ def main():
     ext = [-92.40, -90.55, 0.45, 2.22]
     glon, glat, gz = load_gmrt((ext[0] - 0.1, ext[1] + 0.1, ext[2] - 0.1, ext[3] + 0.1))
     W = 11.0
-    mh = W * 0.9 * (ext[3] - ext[2]) / (ext[1] - ext[0])
+    mh = W * 0.85 * (ext[3] - ext[2]) / (ext[1] - ext[0])
     H = mh + 1.4
     fig = plt.figure(figsize=(W, H))
-    ax = fig.add_axes([0.07, 1.0 / H, 0.9, mh / H], projection=PC)
-    basemap(ax, glon, glat, gz, ext)
+    ax = fig.add_axes([0.07, 1.0 / H, 0.85, mh / H], projection=PC)
+    cmap, norm = bathy(ax, glon, glat, gz, ext, vrange=site_depth_range(perm.depth, new.depth, pct=(5, 95)))
+    colorbar(fig, ax, cmap, norm)
     site_ll = np.vstack([np.column_stack([perm.lon, perm.lat]), np.column_stack([new.lon, new.lat])])
     reserves(ax, rmg, rmh, ext, site_ll)
     for k in range(len(new)):  # link each Sep-29 site to its nearest permit site

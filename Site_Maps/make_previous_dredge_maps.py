@@ -39,17 +39,17 @@ Data corrections made here (and listed in the CSV 'note' column):
 """
 import re
 
-import cmocean
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.colors import LightSource, Normalize
+from matplotlib.colors import LightSource
 from matplotlib.lines import Line2D
 
 import geopandas as gpd
-from make_site_maps import HERE, PC, RES, ROOT, SITES, haversine_km, load_gmrt, place_labels, scalebar
+from make_site_maps import (HERE, PC, RES, ROOT, SITES, bathy, colorbar, haversine_km, load_gmrt, place_labels,
+                            scalebar, site_depth_range)
 from netcdf_lite import netcdf_file
 
 PREV = "/home/tmittal/Dropbox/Work_AI/Permits/9_AT5304_Final_Sites_and_Maps/4_prev_dredges/"
@@ -178,41 +178,6 @@ def load_grid(path, bbox):
     return lon[i0:i1], lat[j0:j1], z
 
 
-def bathy(ax, glon, glat, gz, extent, vrange=None):
-    """cmocean 'deep' coloured depth over a hillshade; land grey-brown. Returns (cmap, norm)."""
-    ax.set_extent(extent, crs=PC)
-    depth = -gz
-    ocean = depth > 0
-    if vrange is None:
-        lo, hi = np.nanpercentile(depth[ocean], [2, 98])
-        vrange = (np.floor(lo / 250) * 250, np.ceil(hi / 250) * 250)
-    cmap, norm = cmocean.cm.deep, Normalize(*vrange)
-    dx = 111_320 * np.cos(np.radians(glat.mean())) * (glon[1] - glon[0])
-    dy = 111_320 * (glat[1] - glat[0])
-    hs = LightSource(azdeg=315, altdeg=40).hillshade(np.nan_to_num(gz, nan=-3000), vert_exag=3, dx=dx, dy=dy)
-    rgb = cmap(norm(np.clip(depth, *vrange)))[..., :3]
-    rgb[~ocean] = np.array([0.72, 0.68, 0.60])
-    rgb = rgb * (0.6 + 0.4 * hs[..., None])
-    ax.imshow(np.clip(rgb, 0, 1), origin="lower", extent=[glon[0], glon[-1], glat[0], glat[-1]], transform=PC,
-              interpolation="bilinear", zorder=0)
-    ax.contour(glon, glat, gz, levels=np.arange(-5000, 0, 500), colors="k", linewidths=0.25, alpha=0.35,
-               transform=PC, zorder=1)
-    ax.contour(glon, glat, gz, levels=[0], colors="0.15", linewidths=0.6, transform=PC, zorder=1)
-    gl = ax.gridlines(draw_labels=True, linewidth=0.3, color="0.3", alpha=0.5, linestyle=":")
-    gl.top_labels = gl.right_labels = False
-    gl.xlabel_style = gl.ylabel_style = {"size": 8}
-    return cmap, norm
-
-
-def colorbar(fig, ax, cmap, norm):
-    bb = ax.get_position()
-    cax = fig.add_axes([bb.x1 + 0.008, bb.y0 + 0.1 * bb.height, 0.012, 0.8 * bb.height])
-    cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax, extend="both")
-    cb.set_label("Water depth (m)", fontsize=9)
-    cb.ax.invert_yaxis()  # shallow at top
-    cb.ax.tick_params(labelsize=8)
-
-
 def reserve_outlines(ax):
     rmg, rmh = gpd.read_file(RES / "RMG.shp"), gpd.read_file(RES / "RMH.shp")
     ax.add_geometries(rmg.geometry, PC, facecolor="none", edgecolor="#00a651", lw=1.1, ls="--", zorder=2)
@@ -270,7 +235,7 @@ def map_permit_with_previous(permit, prev):
     inside = prev[(prev.lon.between(ext[0], ext[1])) & (prev.lat.between(ext[2], ext[3]))]
     glon, glat, gz = load_gmrt((ext[0] - 0.05, ext[1] + 0.05, ext[2] - 0.05, ext[3] + 0.05))
     fig, ax, H = figure_for(ext, band=1.55)
-    cmap, norm = bathy(ax, glon, glat, gz, ext)
+    cmap, norm = bathy(ax, glon, glat, gz, ext, vrange=site_depth_range(permit.depth, inside.depth, pct=(5, 95)))
     reserve_outlines(ax)
     ax.plot(permit.longitude, permit.latitude, color=PERMIT_C, lw=0.9, alpha=0.8, transform=PC, zorder=3)
     draw_previous(ax, inside)
@@ -300,7 +265,7 @@ def map_mv1007(mv):
     ext = pad_extent(lons, lats, 0.12, 0.1)
     glon, glat, gz = load_gmrt((ext[0] - 0.05, ext[1] + 0.05, ext[2] - 0.05, ext[3] + 0.05))
     fig, ax, H = figure_for(ext, band=1.1)
-    cmap, norm = bathy(ax, glon, glat, gz, ext)
+    cmap, norm = bathy(ax, glon, glat, gz, ext, vrange=site_depth_range(mv.depth, mv.off_depth, pct=(5, 95)))
     for r in mv.itertuples():
         ax.plot([r.lon, r.off_lon], [r.lat, r.off_lat], color="#ff7f00", lw=2.2, transform=PC, zorder=3,
                 path_effects=[pe.Stroke(linewidth=3.6, foreground="k"), pe.Normal()])
@@ -416,7 +381,7 @@ def map_glass_status(permit, prev):
     inside = prev[(prev.lon.between(ext[0], ext[1])) & (prev.lat.between(ext[2], ext[3]))]
     glon, glat, gz = load_gmrt((ext[0] - 0.05, ext[1] + 0.05, ext[2] - 0.05, ext[3] + 0.05))
     fig, ax, H = figure_for(ext, band=1.55)
-    cmap, norm = bathy(ax, glon, glat, gz, ext)
+    cmap, norm = bathy(ax, glon, glat, gz, ext, vrange=site_depth_range(permit.depth, inside.depth, pct=(5, 95)))
     reserve_outlines(ax)
     ax.plot(permit.longitude, permit.latitude, color=PERMIT_C, lw=0.9, alpha=0.8, transform=PC, zorder=3)
     draw_previous_glass(ax, inside)
@@ -454,7 +419,7 @@ def map_zooms(permit, prev):
         oth = permit[(permit.longitude.between(ext[0], ext[1])) & (permit.latitude.between(ext[2], ext[3]))]
         glon, glat, gz = load_gmrt((ext[0] - 0.05, ext[1] + 0.05, ext[2] - 0.05, ext[3] + 0.05))
         fig, ax, H = figure_for(ext, width=10.0, band=1.4)
-        cmap, norm = bathy(ax, glon, glat, gz, ext)
+        cmap, norm = bathy(ax, glon, glat, gz, ext, vrange=site_depth_range(oth.depth, inside.depth))
         has50 = overlay_cut50(ax, cmap, norm, ext)
         reserve_outlines(ax)
         ax.plot(permit.longitude, permit.latitude, color=PERMIT_C, lw=1.0, alpha=0.8, transform=PC, zorder=3)
