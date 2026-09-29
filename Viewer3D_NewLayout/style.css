@@ -1,0 +1,499 @@
+html, body, #cesiumContainer {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #050912;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+
+#panel {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 280px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  background: rgba(15, 20, 28, 0.88);
+  color: #e8ecf1;
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.4);
+  z-index: 10;
+}
+
+.panel-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  color: #fff;
+}
+
+.control-group {
+  margin-bottom: 12px;
+}
+
+.control-group label {
+  display: block;
+  margin-bottom: 4px;
+  color: #b9c2cc;
+}
+
+.radio-row {
+  display: flex;
+  gap: 14px;
+}
+
+.radio-row label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #e8ecf1;
+  margin: 0;
+}
+
+select, button {
+  width: 100%;
+  box-sizing: border-box;
+  background: #1c2733;
+  color: #e8ecf1;
+  border: 1px solid #34424f;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  background: #26333f;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button:disabled:hover {
+  background: #1c2733;
+}
+
+input[type="range"] {
+  width: 100%;
+}
+
+#statsBox, #pickBox {
+  font-size: 12px;
+  color: #9aa7b2;
+  border-top: 1px solid #2b3742;
+  padding-top: 8px;
+  white-space: pre-line;
+}
+
+.ds-section {
+  margin-bottom: 8px;
+  border: 1px solid #2b3742;
+  border-radius: 6px;
+  background: rgba(22, 31, 41, 0.4);
+  padding: 0 8px 8px 8px;
+}
+
+.ds-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.ds-section summary {
+  cursor: pointer;
+  padding: 8px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8ecf1;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ds-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.ds-section summary::after {
+  content: "+";
+  color: #7f8b97;
+  font-weight: 400;
+  font-size: 15px;
+}
+
+.ds-section[open] summary::after {
+  content: "\2212";
+}
+
+.ds-section-note {
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.ds-section-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ds-section-list:empty::before {
+  content: "None yet.";
+  font-size: 11px;
+  color: #7f8b97;
+}
+
+.ds-row {
+  background: #161f29;
+  border: 1px solid #2b3742;
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+
+.ds-row label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  cursor: pointer;
+  color: #e8ecf1;
+}
+
+.ds-row input[type="checkbox"] {
+  margin-top: 2px;
+  flex: none;
+}
+
+.ds-label {
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.ds-meta {
+  margin-top: 3px;
+  margin-left: 22px;
+  font-size: 11px;
+  color: #7f8b97;
+}
+
+.cam-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.cam-grid button {
+  font-size: 16px;
+  padding: 6px 0;
+}
+
+.cam-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #7f8b97;
+  line-height: 1.35;
+}
+
+.hint-text {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #7f8b97;
+  line-height: 1.35;
+}
+
+#legendList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.legend-empty {
+  font-size: 11px;
+  color: #7f8b97;
+}
+
+.legend-row {
+  background: #161f29;
+  border: 1px solid #2b3742;
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+
+.legend-title {
+  font-size: 11px;
+  color: #b9c2cc;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.legend-bar {
+  width: 100%;
+  height: 12px;
+  border-radius: 2px;
+  display: block;
+}
+
+.legend-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #7f8b97;
+  margin-top: 3px;
+}
+
+/* ---- Draggable re-window handles on a legend colorbar (new-layout
+   manual colour stretch) -- see buildLegendRow()/getActiveColorWindow() in
+   app.js. The canvas always draws the FULL spectrum across the layer's full
+   data range; the two handles mark the current [lo, hi] window that's
+   actually mapped to colour on the mesh right now, and the dimmed strips
+   outside them show what's currently clamped to the end colours. ---- */
+.legend-track {
+  position: relative;
+  margin-top: 2px;
+  padding: 7px 0;
+  touch-action: none;
+}
+
+.legend-dim {
+  position: absolute;
+  top: 7px;
+  height: 12px;
+  background: rgba(5, 9, 18, 0.62);
+  pointer-events: none;
+  border-radius: 2px;
+}
+
+.legend-handle {
+  position: absolute;
+  top: 2px;
+  width: 9px;
+  height: 22px;
+  margin-left: -5px;
+  background: #e8ecf1;
+  border: 1px solid #0b0b0b;
+  border-radius: 3px;
+  cursor: ew-resize;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.5);
+}
+
+.legend-handle:hover,
+.legend-handle:focus {
+  background: #4aa3ff;
+  outline: none;
+}
+
+.legend-handle:active {
+  background: #ffd400;
+}
+
+.legend-window-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #d3d9df;
+  margin-top: 2px;
+}
+
+.legend-window-labels span {
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-reset-row {
+  margin-top: 3px;
+}
+
+.legend-reset-btn {
+  width: auto;
+  background: none;
+  border: none;
+  color: #6fa8e0;
+  font-size: 10px;
+  padding: 0;
+  cursor: pointer;
+}
+
+.legend-reset-btn:hover {
+  color: #9cc4ee;
+  background: none;
+  text-decoration: underline;
+}
+
+.legend-reset-btn:disabled {
+  color: #566370;
+  cursor: default;
+  text-decoration: none;
+}
+
+#trackCsvInput {
+  width: 100%;
+  box-sizing: border-box;
+  background: #1c2733;
+  color: #e8ecf1;
+  border: 1px solid #34424f;
+  border-radius: 4px;
+  padding: 5px 6px;
+  font-size: 12px;
+}
+
+.track-buttons {
+  margin-top: 6px;
+}
+
+.cross-section-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.cross-section-buttons button {
+  flex: 1;
+}
+
+#exportGeoTiffBtn {
+  margin-top: 8px;
+}
+
+/* ---- Cross-section profile dock (new layout): a big, full-width
+   panel across the bottom of the screen, not the narrow sidebar -- see
+   index.html and app.js's "Cross-section dock" section. ---- */
+.cross-section-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 38vh;
+  background: rgba(11, 15, 22, 0.94);
+  color: #e8ecf1;
+  border-top: 1px solid #2b3742;
+  box-shadow: 0 -4px 18px rgba(0,0,0,0.45);
+  z-index: 15;
+  display: flex;
+  flex-direction: column;
+}
+
+.cross-section-dock.hidden {
+  display: none;
+}
+
+.dock-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid #2b3742;
+  flex: none;
+}
+
+.dock-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.dock-header-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.dock-header-buttons button {
+  width: auto;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+#crossSectionDockCloseBtn {
+  font-size: 15px;
+  line-height: 1;
+  padding: 4px 9px;
+}
+
+.cross-section-plots-dock {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 10px;
+  padding: 10px 14px 14px 14px;
+  overflow-y: auto;
+}
+
+.cross-section-plot-dock {
+  background: #10161f;
+  border: 1px solid #2b3742;
+  border-radius: 6px;
+  padding: 4px;
+  flex: 0 0 auto;
+}
+
+.cross-section-canvas-dock {
+  display: block;
+  border-radius: 4px;
+}
+
+.track-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.track-legend-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: #d3d9df;
+}
+
+.track-legend-swatch {
+  width: 11px;
+  height: 11px;
+  min-width: 11px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  display: inline-block;
+}
+
+#loading {
+  position: absolute;
+  inset: 0;
+  background: #050912;
+  color: #e8ecf1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+  font-size: 14px;
+}
+
+#loadingBarOuter {
+  width: 260px;
+  height: 6px;
+  background: #1c2733;
+  border-radius: 3px;
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+#loadingBarInner {
+  width: 0%;
+  height: 100%;
+  background: #4aa3ff;
+  transition: width 0.2s;
+}
+
+#loading.hidden {
+  display: none;
+}

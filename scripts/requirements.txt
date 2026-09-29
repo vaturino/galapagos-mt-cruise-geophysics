@@ -4,3 +4,4 @@ tifffile>=2023.7.10
 rasterio>=1.4
 pyproj>=3.7
 segyio>=1.9
+imagecodecs>=2024.1.1

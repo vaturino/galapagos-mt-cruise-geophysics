@@ -152,9 +152,16 @@ works with no environment and no internet at all.
   `derived/` folder next to the input. Refuses RGB/RGBA image GeoTIFFs (e.g.
   Viewer3D screenshot exports) since colours are not elevations. Use `--bbox`
   and `--zone` for a survey area (UTM scale error grows past ~6 deg from the
-  zone's central meridian; the script warns). Handles the full 245 m GMRT
-  corridor grid in ~1 min / 2.4 GB RAM. `--help` for all options. Needs
-  numpy, scipy, tifffile.
+  zone's central meridian; the script warns). `--products` picks which
+  outputs to write (default: all of them) — e.g. `--products elev,slope`
+  for just absolute height + slope. Handles the full 245 m GMRT corridor
+  grid in ~1 min / 2.4 GB RAM. `--help` for all options. Needs numpy, scipy,
+  tifffile, and (only for a GeoTIFF written with a compressed
+  floating-point predictor, e.g. `rasterio`'s default float32 deflate
+  output) `imagecodecs` — without it, `tifffile` raises `ValueError:
+  <PREDICTOR.FLOATINGPOINT: 3> requires the 'imagecodecs' package` on
+  otherwise-valid input; `imagecodecs` is in `requirements.txt` so
+  `setup_env.sh` already covers it.
 
 ## Suggested order, starting from scratch
 
@@ -162,7 +169,7 @@ Most of these are independent, run-as-needed utilities, not a fixed
 pipeline — but a reasonable order when building everything up from source
 data is:
 
-1. `./setup_env.sh` (once per machine) + `source venv/bin/activate`
+1. `./setup_env.sh` (once per machine), then run scripts as `venv/bin/python3 <script>.py` (see "One-time setup" above for why not `source venv/bin/activate`)
 2. `extract_geomapapp_layers.py` against the cruise's own data transfer, if
    working with that dataset (see the root `README.md`'s Data section)
 3. *(optional)* `mosaic_geomapapp_grids.py` on the extracted per-line

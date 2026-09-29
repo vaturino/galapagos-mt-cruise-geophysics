@@ -41,3 +41,7 @@ __pycache__/
 
 # Script run logs (not documentation)
 *.log
+
+# Windows/exFAT external-drive metadata folders
+$RECYCLE.BIN/
+System Volume Information/

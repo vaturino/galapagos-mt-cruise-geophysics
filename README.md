@@ -19,7 +19,7 @@ and is not versioned in this repository.
 ## Setup
 
 Requires Python 3.9+. Most scripts need a handful of packages (numpy, scipy,
-tifffile, rasterio, pyproj, segyio), installed into a local virtual
+tifffile, rasterio, pyproj, segyio, imagecodecs), installed into a local virtual
 environment (not committed to the repository, and not shared between
 machines — each one is tied to the OS/architecture it was built on):
 
