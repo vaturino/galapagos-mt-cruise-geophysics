@@ -123,7 +123,8 @@ GeoMapApp will open it — see `DATA_MANIFEST.md` and
    - If it's a **bathymetry grid with known bad-data spikes** (this has come
      up twice already, in two unrelated datasets — see "Known data-quality
      issues" in [`Viewer3D/README.md`](../Viewer3D/README.md)) → run the
-     relevant one-off fixer first: `venv/bin/python3 fix_gmrt_spikes.py` or
+     relevant fixer first: `venv/bin/python3 fix_gmrt_spikes.py` (after
+     `fetch_copernicus_reference.py`) or
      `venv/bin/python3 fix_mittelstaedt_bath_spikes.py`. Only relevant to those two specific
      files unless a new dataset turns out to have the same problem.
    - Otherwise a `.grd` (classic NetCDF3 *or* GMT's newer NetCDF4/HDF5
@@ -233,13 +234,27 @@ Grouped by the job it belongs to above, not alphabetically.
   pattern generalizes to any projected-CRS GeoTIFF; change `SRC`/`DST`/the
   bbox. See `Viewer3D/README.md`'s "Reading other formats". Needs
   rasterio, pyproj.
-- **`fix_gmrt_spikes.py`** — one-off repair for the Wolf/Darwin Island
-  bad-data spikes baked into GMRT's own synthesis of
-  `GMRT_corridor_basemap.grd` (mask + Laplacian inpaint, tightly scoped to
-  each island); writes a `_clean.grd` copy, leaves the original untouched.
-  Re-run if that grid is ever re-fetched from GMRT. See
-  `Viewer3D/README.md`'s "Known data-quality issues" for the full story.
-  Needs numpy, scipy.
+- **`fetch_copernicus_reference.py`** — builds
+  `GMRT_regional/GMRT_Basemap/copernicus_glo90_on_gmrt_grid.tif`: the
+  Copernicus GLO-90 DEM (public AWS bucket, no login), area-averaged onto
+  `GMRT_corridor_basemap.grd`'s own nodes, used as an independent land
+  reference by the next two scripts. Needs internet once (~1 min); run it
+  before `fix_gmrt_spikes.py`. Needs numpy, rasterio.
+- **`fix_gmrt_spikes.py`** — repairs the bad-data spikes and pits baked
+  into GMRT's own synthesis of `GMRT_corridor_basemap.grd`: the Wolf/Darwin
+  Island patches, then every land cell more than 300 m off Copernicus
+  (replaced with Copernicus plus an inpainted residual), then isolated
+  ocean cells more than 1500 m off their 5x5 median (inpainted). Writes a
+  `_clean.grd` copy, leaves the original untouched. Re-run if that grid is
+  ever re-fetched from GMRT, then rebuild `GMRT_basemap` and the eight
+  GMRT-draped geophysics layers. See `Viewer3D/README.md`'s "Known
+  data-quality issues" for the full story. Needs numpy, scipy, rasterio.
+- **`validate_gmrt_clean.py`** — pass/fail checks on `fix_gmrt_spikes.py`'s
+  output against references independent of the repair: documented summit
+  heights, known artifact sites against Copernicus and the DOA-ETP
+  multibeam, a real ocean depression that must survive, the Wolf/Darwin
+  caps, and the fraction of cells changed. Exits non-zero on any failure.
+  Needs numpy, rasterio.
 - **`fix_mittelstaedt_bath_spikes.py`** — same problem, independently, in a
   completely different dataset: `FOR_TUSHAR/CUT_bath.grd` (the
   Mittelstaedt-group Galapagos platform compilation) has its own Wolf
@@ -277,6 +292,13 @@ Grouped by the job it belongs to above, not alphabetically.
 - **`validate_xyz.py`** — same check as `validate_gmrt.py`, for grids
   already in `x`/`y`/`z` convention (run after `gmrt_to_xyz.py`). Needs
   numpy.
+- **`audit_viewer_meshes.py`** — checks every `Viewer3D/data/` mesh against
+  the source grid it was built from, at each vertex's own lon/lat (values,
+  and drape terrain for geophysics layers), both as stored and flipped
+  north-south, so an upside-down or stale build shows up immediately. Run
+  it after rebuilding any layer; exits non-zero on a mismatch. A new
+  dataset needs its source added to `SOURCES` at the top. Needs numpy
+  (plus rasterio for GeoTIFF/NetCDF4 sources).
 
 ### Other formats
 - **`segy_inspect.py`** — reads a SEGY seismic file's headers (trace count,

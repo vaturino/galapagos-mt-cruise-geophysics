@@ -97,6 +97,25 @@ See `GMRT_regional/README.md` for the `resolution` parameter's behavior
 returns a coarser grid) and `Viewer3D/README.md` for how this basemap was
 decimated for the 3D viewer.
 
+**Download check:** GMRT streams this file without a `Content-Length`
+header, so a dropped connection leaves a truncated but valid-looking `.grd`
+and `curl` still exits 0 (seen once: 75 MB instead of 633 MB). Confirm the
+size is 633,022,184 bytes, or run `scripts/inspect_gmrt.py` on it, before
+using it.
+
+**Land reference for the spike repair — Copernicus GLO-90 DEM.**
+`scripts/fetch_copernicus_reference.py` reads the 1x1 deg Copernicus GLO-90
+tiles covering this bbox (139 of 416 exist; the rest are all ocean)
+straight from the public AWS Open Data bucket
+(`https://copernicus-dem-90m.s3.amazonaws.com/`, no login;
+[registry entry](https://registry.opendata.aws/copernicus-dem/)) and
+area-averages them onto the GMRT nodes, writing
+`GMRT_regional/GMRT_Basemap/copernicus_glo90_on_gmrt_grid.tif` (float32,
+NaN = no tile). `scripts/fix_gmrt_spikes.py` needs it. Copernicus DEM ©
+DLR e.V. 2010-2014 and © Airbus Defence and Space GmbH 2014-2018, provided
+under COPERNICUS by the European Union and ESA; free for any use, with
+attribution.
+
 ## Cruise-internal data (not tracked, not publicly obtainable)
 
 The MV1007 cruise's own processed bathymetry and backscatter set

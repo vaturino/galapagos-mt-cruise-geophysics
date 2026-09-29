@@ -26,19 +26,67 @@ Method (see project notes / chat log for the full investigation):
     resolution (both islands are only ~1-2 km across, i.e. a handful of
     cells, so this coarse product was never going to resolve their true
     summits precisely even before the bug).
+
+Two further stages (added 2026-09-29) handle the same class of artifact
+across the rest of the corridor, which the Wolf/Darwin patches don't reach.
+GMRT's land synthesis here has thousands of bad cells, mostly in Colombia,
+Ecuador, and Panama: multi-cell blobs 3-5 km too high (7183 m in the Darien,
+where the real terrain is ~1.5 km; 4983 m in the Esmeraldas lowlands, real
+~0.7 km; up to 3766 m in the Pacific mangrove lowlands near Tumaco, real
+~0-30 m) and some pits 1-2 km too deep (southern Ecuadorian Andes). Most are
+not caught by any height cutoff, since real Andean summits reach 6263 m.
+
+  - Land (stage 2): wherever the Copernicus GLO-90 DEM has a tile, compare
+    against it (copernicus_glo90_on_gmrt_grid.tif, built by
+    fetch_copernicus_reference.py; area-averaged onto the GMRT nodes). On
+    land the two agree to a median of -5 m, MAD 10 m, and a 245 m cell's
+    point value can't differ from its area average by more than ~200 m even
+    on 45 deg slopes. Cells where |GMRT - Copernicus| > LAND_CORE_M (300 m)
+    are artifacts (a 500 m cutoff left ~4400 cells at 300-500 m, 84 % of
+    them too HIGH -- spike skirts, not symmetric resampling noise); the mask grows
+    from them into connected cells with |diff| > LAND_GROW_M (150 m) to take
+    in each blob's tapering skirt. Masked cells get Copernicus plus a
+    Laplacian-inpainted residual (GMRT - Copernicus) from the unmasked
+    neighbours, so the repaired surface has Copernicus's real terrain shape
+    and joins GMRT seamlessly at the mask edge. A false positive here costs
+    little: that cell just takes an independent 90 m DEM's value.
+  - Ocean (stage 3): no independent grid covers the whole ocean, so cells
+    outside Copernicus land use a local test for isolated spikes/pits:
+    |z - median of 5x5 cells| > OCEAN_CORE_M (1500 m), grown only into
+    8-connected neighbours with |resid| > OCEAN_GROW_M (1000 m), then
+    Laplacian-inpainted (same as the island patches). Both numbers were
+    checked against the DOA-ETP multibeam (MBES) compilation: every cell
+    flagged where MBES has data is an artifact (e.g. a +1910 m "island" at
+    2.77N 80.30W where MBES has -2400 m; a -6456 m single-cell pit at 3.82N
+    89.95W where MBES has -3290 m), while real steep features stay below it
+    (-3585 m at 8.64N 84.49W, MBES -3395 m, residual -1105 m). The narrow
+    window and tight growth matter: that -6456 m cell sits inside a REAL
+    ~2 km-deep closed depression (MBES down to about -4590 m), and a wider
+    window with growth into |resid| > 300 m flattened the whole depression.
+
+validate_gmrt_clean.py checks the result against both references.
 """
 import numpy as np
+import rasterio
 from netcdf_lite import netcdf_file
 from scipy import ndimage
 
 SRC = "../GMRT_regional/GMRT_Basemap/GMRT_corridor_basemap.grd"
 DST = "../GMRT_regional/GMRT_Basemap/GMRT_corridor_basemap_clean.grd"
+COP_REF = "../GMRT_regional/GMRT_Basemap/copernicus_glo90_on_gmrt_grid.tif"
 
 PATCHES = [
     # name, lat0, lat1, lon0, lon1, cap_m, dilation_iters
     ("Wolf Island",   1.30, 1.45, -91.90, -91.75, 300.0, 2),
     ("Darwin Island", 1.58, 1.78, -92.10, -91.90, 250.0, 2),
 ]
+
+LAND_CORE_M = 300.0    # |GMRT - Copernicus| that marks a cell as bad
+LAND_GROW_M = 150.0    # connected cells above this join the bad blob
+OCEAN_CORE_M = 1500.0  # |z - 5x5 median| that marks an ocean cell as bad
+OCEAN_GROW_M = 1000.0  # adjacent cells above this join it (keeps real basins out)
+MEDIAN_WIN = 5         # ~1.2 km at this grid's ~245 m spacing
+BOX_MARGIN = 4         # cells of context around each blob for inpainting
 
 
 def crop_idx(lat, lon, lat0, lat1, lon0, lon1):
@@ -69,6 +117,60 @@ def inpaint(sub, mask, iters=1200):
         avg = (up + down + left + right) / 4.0
         out = np.where(valid, sub, avg)
     return out
+
+
+def grow_mask(core, grow, domain, dilate):
+    """core cells plus every 8-connected cell of (grow | core), inside domain, dilated `dilate`."""
+    lab, _ = ndimage.label((grow | core) & domain, structure=np.ones((3, 3)))
+    keep = np.unique(lab[core])
+    keep = keep[keep > 0]
+    mask = np.isin(lab, keep)
+    if dilate:
+        mask = ndimage.binary_dilation(mask, iterations=dilate)
+    return mask & domain
+
+
+def inpaint_blobs(field, mask):
+    """Laplacian-inpaint `field` over `mask`, one bounding box per blob (in place)."""
+    lab, n = ndimage.label(mask)
+    ny, nx = field.shape
+    for k, sl in enumerate(ndimage.find_objects(lab), 1):
+        j0 = max(sl[0].start - BOX_MARGIN, 0); j1 = min(sl[0].stop + BOX_MARGIN, ny)
+        i0 = max(sl[1].start - BOX_MARGIN, 0); i1 = min(sl[1].stop + BOX_MARGIN, nx)
+        m = mask[j0:j1, i0:i1]  # includes neighbouring blobs in the box: all unknown
+        field[j0:j1, i0:i1][m] = inpaint(field[j0:j1, i0:i1], m, iters=600)[m]
+    return n
+
+
+def fix_land(z, ref):
+    """Stage 2: Copernicus-guided repair of land cells. Returns (mask, stats)."""
+    domain = np.isfinite(ref) & np.isfinite(z) & ((z > 0) | (ref > 0.5))
+    resid = np.where(domain, z - ref, 0.0)
+    absr = np.abs(resid)
+    core = domain & (absr > LAND_CORE_M)
+    mask = grow_mask(core, absr > LAND_GROW_M, domain, dilate=1)
+    stats = dict(core=int(core.sum()), cells=int(mask.sum()),
+                 hi=int((core & (resid > 0)).sum()), lo=int((core & (resid < 0)).sum()),
+                 worst_hi=float(resid[core].max()) if core.any() else 0.0,
+                 worst_lo=float(resid[core].min()) if core.any() else 0.0)
+    r = resid.copy()
+    stats["blobs"] = inpaint_blobs(r, mask)
+    z[mask] = ref[mask] + r[mask]
+    return mask, stats
+
+
+def fix_ocean(z, land_domain):
+    """Stage 3: local-median repair of ocean cells outside Copernicus land. Returns (mask, stats)."""
+    domain = ~land_domain & np.isfinite(z)
+    med = ndimage.median_filter(np.where(np.isfinite(z), z, 0.0).astype(np.float32), size=MEDIAN_WIN)
+    resid = np.where(domain, z - med, 0.0)
+    absr = np.abs(resid)
+    core = domain & (absr > OCEAN_CORE_M)
+    mask = grow_mask(core, absr > OCEAN_GROW_M, domain, dilate=0)
+    stats = dict(core=int(core.sum()), cells=int(mask.sum()),
+                 hi=int((core & (resid > 0)).sum()), lo=int((core & (resid < 0)).sum()))
+    stats["blobs"] = inpaint_blobs(z, mask)
+    return mask, stats
 
 
 def main():
@@ -103,6 +205,24 @@ def main():
         print(f"{name}: patched {n} cells, lat[{lat0},{lat1}] lon[{lon0},{lon1}], "
               f"max before={before_max:.1f} m -> max after={repaired[mask].max():.1f} m")
 
+    print(f"Reading Copernicus reference {COP_REF} (build it with fetch_copernicus_reference.py)...")
+    with rasterio.open(COP_REF) as ds:
+        ref = ds.read(1)[::-1].astype(np.float64)  # north-up -> south->north rows, like the grd
+    if ref.shape != z_full.shape:
+        raise RuntimeError(f"reference shape {ref.shape} != grid shape {z_full.shape} -- rebuild it for this grid")
+
+    land_mask, s = fix_land(z_full, ref)
+    total_patched += s["cells"]
+    print(f"Land (vs Copernicus): {s['core']} cells off by >{LAND_CORE_M:.0f} m "
+          f"({s['hi']} too high, worst +{s['worst_hi']:.0f} m; {s['lo']} too low, worst {s['worst_lo']:.0f} m); "
+          f"patched {s['cells']} cells in {s['blobs']} blobs")
+
+    land_domain = np.isfinite(ref) & ((ref > 0.5) | (z_full > 0))
+    _, s = fix_ocean(z_full, land_domain)
+    total_patched += s["cells"]
+    print(f"Ocean (vs {MEDIAN_WIN}x{MEDIAN_WIN} median): {s['core']} cells off by >{OCEAN_CORE_M:.0f} m "
+          f"({s['hi']} spikes, {s['lo']} pits); patched {s['cells']} cells in {s['blobs']} blobs")
+
     print(f"Total cells patched: {total_patched} out of {z_full.size} ({100*total_patched/z_full.size:.5f}%)")
 
     new_range = np.array([np.nanmin(z_full), np.nanmax(z_full)], dtype=">f8")
@@ -115,7 +235,9 @@ def main():
     setattr(out, "history",
             (global_attrs.get("history", b"").decode() if isinstance(global_attrs.get("history"), bytes) else str(global_attrs.get("history", ""))) +
             "\nPatched by Viewer3D project: Wolf/Darwin Island bad-data spikes replaced with local "
-            "Laplacian-inpainted values (see fix_gmrt_spikes.py). Original file: GMRT_corridor_basemap.grd."
+            "Laplacian-inpainted values; land cells off from Copernicus GLO-90 by >500 m replaced with "
+            "Copernicus plus an inpainted residual; ocean cells off from their 5x5 median by >1500 m "
+            "inpainted (see fix_gmrt_spikes.py). Original file: GMRT_corridor_basemap.grd."
             )
 
     out.createDimension("lat", lat.size)

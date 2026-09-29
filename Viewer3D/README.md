@@ -420,28 +420,51 @@ original `CUT_bath.grd`. `Mittelstaedt_Galapagos_Bathy` and all four
 coloured VALUE, would otherwise have sampled the spike) are built from the
 clean file.
 
-**A broader area of likely bad data exists in the mainland corridor,
-unfixed.** While investigating the above, a wider scan (comparing each
-cell to its immediate neighbours, `median_filter` size 3 with a 600 m
-residual threshold -- calibrated to zero false positives against Wolf
-Volcano, Cerro Azul, Sierra Negra, Alcedo and a Chimborazo/Cotopaxi check
-window) turned up roughly 5,400 additional suspect cells scattered across
-the Panama/Colombia/Ecuador mainland, including a single point at
-7.75N/77.75W reading 7183 m (there is no real peak anywhere near that in
-the Darien region -- the actual highest point nearby is roughly 1,900 m).
-Some of these are clearly isolated single-cell "salt and pepper" noise
-sitting on otherwise smooth hills (visually confirmed around 7.6-7.9N/
-77.55-77.95W); many others fall inside the true high Andes (e.g. a
-1,121-cell cluster spanning roughly 0.2S-2.7N/76.1-78.0W, which is
-genuinely some of the most rugged terrain on the continent) and are very
-likely real steep relief, not artifacts -- telling the two apart reliably
-would need an independent elevation source (e.g. SRTM/ASTER) to check
-against, which this project hasn't done. **None of this mainland area was
-touched by the fix above** -- it's thousands of km from the Galapagos
-survey area this project cares about, so trying to auto-correct it risked
-doing more harm (flattening real Andean relief) than leaving it alone. If
-a future task ever needs the mainland portion of `GMRT_basemap` for
-anything quantitative, treat it as unvalidated and check it first.
+**Mainland (and a few ocean) bad-data spikes and pits across the whole
+corridor (fixed 2026-09-29).** GMRT's synthesis has the same kind of
+artifact far beyond Wolf/Darwin: thousands of mainland cells in multi-cell
+blobs 3-5 km too high (7183 m in the Darien at 7.73N/77.75W, where the
+terrain is ~1.5 km; 6570 m in Antioquia; 4983 m in the Esmeraldas
+lowlands, real ~0.7 km; 3766 m in the Tumaco mangrove lowlands, real
+~0-30 m) and pits 1-2 km too deep (southern Ecuadorian Andes). A height
+cutoff can't separate these from the real high Andes, and an earlier
+local-neighbour scan couldn't either. The fix uses an independent DEM
+instead: `scripts/fetch_copernicus_reference.py` area-averages the
+Copernicus GLO-90 DEM onto the GMRT nodes (it agrees with GMRT on land to a
+median of -5 m, MAD 10 m), and `scripts/fix_gmrt_spikes.py` replaces every
+land cell more than 300 m off Copernicus (plus its connected >150 m skirt)
+with Copernicus plus an inpainted residual. Real relief is untouched,
+because it agrees with Copernicus: Chimborazo stays at 6197 m (documented
+6263 m), Cotopaxi 5802 m, Cayambe 5715 m. In the ocean, where Copernicus
+has no data, only isolated cells more than 1500 m off their 5x5 median are
+inpainted. That threshold was checked against the DOA-ETP multibeam, which
+confirmed every flagged cell it covers is bad (a +1910 m "island" at
+2.77N/80.30W over 2400 m of water, a -6456 m single-cell pit at
+3.82N/89.95W). A wider window was tried first and rejected: that pit sits
+inside a REAL ~2 km-deep closed depression (MBES to ~-4590 m), which it
+flattened. In total 0.21 % of the grid's cells changed. The corrected grid's max is
+6197 m (was 7183 m) and its min -5342 m (was -6456 m).
+`scripts/validate_gmrt_clean.py` re-checks all of this (summits,
+artifact sites against Copernicus and MBES, the real depression, the
+Wolf/Darwin caps) and fails on the pre-fix grid; before/after/reference
+maps are in `GMRT_regional/GMRT_Basemap/spike_fix_before_after.png`.
+`GMRT_basemap`, all eight GMRT-draped geophysics layers (seven of which had
+been draped on the raw, unrepaired grid), and
+`GeoMapApp_ready/GMRT_regional/GMRT_corridor_basemap.grd` were rebuilt from
+the corrected grid. Remaining GMRT-vs-Copernicus differences on land are
+below 300 m (99.9th percentile 169 m): mostly GMRT's coarser, noisier
+lowland data, not spikes.
+
+**Two meshes were upside down north-south (fixed 2026-09-29).**
+`DRFT04RR` and `Geophys_Barckhausen_Magnetics` were built on 2026-09-21/23
+from `_geomapapp` grids written before `fix_mgds_grid.py`'s old-style-GMT
+row-order fix (commit 733bec3), and were never rebuilt afterwards: every
+vertex carried the value from the mirror-image latitude. DRFT04RR's old
+mesh correlated with the GMRT basemap at only r = 0.32 (median 820 m off);
+the rebuilt one is at r = 0.998 (median 15 m). Both were rebuilt from
+freshly regenerated `_geomapapp` grids. `scripts/audit_viewer_meshes.py`
+now checks every layer against its source grid at each vertex's own
+lon/lat, both as stored and flipped north-south; run it after any rebuild.
 
 **Native vs. shown resolution (resolved -- all survey grids now ship at
 native).** The first pass at this (stride-2, ~2x native, for `MV1007` /
@@ -1102,11 +1125,16 @@ GeoTIFF export below.
   "Geophysics layers" above) any time the source grid changes -- these are
   build products, not something to hand-edit.
 - `run_viewer.py` -- the local server / launcher described above.
-- `scripts/fix_gmrt_spikes.py` -- one-off repair for the Wolf/Darwin Island
-  bad-data spikes in `GMRT_corridor_basemap.grd` (see "Known data-quality
-  issues" above); writes `GMRT_corridor_basemap_clean.grd` alongside the
-  untouched original. Re-run it if `GMRT_corridor_basemap.grd` is ever
-  re-fetched from GMRT.
+- `scripts/fix_gmrt_spikes.py` -- repair for the bad-data spikes and pits
+  in `GMRT_corridor_basemap.grd` (Wolf/Darwin, then the whole corridor
+  against Copernicus GLO-90 on land and a local median test in the ocean --
+  see "Known data-quality issues" above); writes
+  `GMRT_corridor_basemap_clean.grd` alongside the untouched original. Re-run
+  it (after `scripts/fetch_copernicus_reference.py`) if
+  `GMRT_corridor_basemap.grd` is ever re-fetched from GMRT, then check with
+  `scripts/validate_gmrt_clean.py`.
+- `scripts/audit_viewer_meshes.py` -- checks every mesh in `data/` against
+  its source grid (see "Two meshes were upside down" above).
 - `scripts/crop_reproject_doa_etp.py` -- crops + reprojects a GeoTIFF from
   a projected CRS to lon/lat via a memory-safe streaming `WarpedVRT` read
   (see "Reading other formats" above); a general pattern to copy for the
@@ -1151,11 +1179,12 @@ GeoTIFF export below.
   Checking on more than one or two native-resolution survey layers at once
   is heavy for a laptop GPU -- see "Native vs. shown resolution" above for
   the file sizes and triangle counts.
-- `GMRT_basemap`'s source grid had two bad-data spikes at Wolf and Darwin
-  Islands (up to 6288 m where the real peak is 165 m) which are now
-  repaired; a separate, much larger area of likely-bad cells in the
-  mainland Panama/Colombia/Ecuador corridor was found but deliberately
-  left untouched -- see "Known data-quality issues" above.
+- `GMRT_basemap`'s source grid had bad-data spikes and pits at Wolf and
+  Darwin Islands and across the mainland Panama/Colombia/Ecuador corridor
+  (up to 7183 m where the real terrain is ~1.5 km), plus a few in the
+  ocean; all are repaired against Copernicus GLO-90 (land) and a local
+  median test checked against multibeam (ocean) -- see "Known data-quality
+  issues" above.
 - The `GMRT_basemap` layer is a coarse (~978 m/post) public synthesis, not
   survey-grade data -- it's regional context to orient the detailed surveys
   against, not something to read precise depths from. There's still no
