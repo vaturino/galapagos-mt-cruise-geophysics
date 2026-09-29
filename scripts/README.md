@@ -4,7 +4,8 @@ Python tooling for extracting, converting, validating, and meshing the
 datasets referenced in `DATA_MANIFEST.md`. Every script takes its
 input/output paths as command-line arguments (or resolves local imports
 relative to this folder) — nothing is hardcoded to a particular machine or
-mount point.
+mount point (one exception, `build_geomapapp_mosaics.py`, is called out
+below).
 
 ## One-time setup (per machine)
 
@@ -53,8 +54,100 @@ is what actually put them where they'll persist).
 `extract_geomapapp_layers.py` needs nothing extra — it's stdlib-only and
 works with no environment and no internet at all.
 
+## Quick start: three common jobs
+
+If setup worked and you're just unsure what to actually run: these scripts
+are **not** one fixed pipeline you run start-to-finish — they're a toolbox,
+and which ones you need depends on what you're trying to do. Pick the job
+below that matches, and run only that numbered list.
+
+### Job A — I just want to open the 3D viewer and look at the data
+
+Nothing to run. The viewer's data is already built.
+
+1. `cd Viewer3D` (or `Viewer3D_NewLayout` for the alternate layout — see its
+   own `README.md`)
+2. `python3 run_viewer.py` — opens it in your browser at `localhost`
+
+Full usage: [`Viewer3D/README.md`](../Viewer3D/README.md).
+
+### Job B — I have a new/updated grid and want it importable in GeoMapApp
+
+This is the most common reason to touch these scripts: a raw downloaded
+grid (from MGDS, GMRT, or anywhere else) usually needs converting before
+GeoMapApp will open it — see `DATA_MANIFEST.md` and
+[`GMRT_regional/README.md`](../GMRT_regional/README.md) for why.
+
+1. Look at the grid's own variables/format first — this decides which
+   script you need next:
+   - Came from **MGDS** (old-style GMT `x_range`/`y_range`/`z_range`, modern
+     `x`/`y`/`z` with 0–360° longitude, or ESRI ASCII `.asc`) →
+     **`fix_mgds_grid.py`**. This is the general-purpose fixer; prefer it
+     over the two narrower/older scripts below for any *new* pull.
+   - Came from **GMRT's GridServer** (`lon`/`lat`/`altitude` variables) →
+     **`gmrt_to_xyz.py`** (rename only, no value changes), or
+     **`grd_to_float32.py`** first if you also want to roughly halve the
+     file size (downcast float64 → float32) before renaming.
+   - An **old-style GMT grid in a projected/UTM CRS** (rare — only needed
+     for old MATLAB-`write_gmt`-style files) → `gmt_grd_to_geotiff.py`.
+   - A **plain ASCII lon/lat/value text file** → `ascii_xyz_to_grd.py`
+     (writes a `.grd` if the points form a regular grid, otherwise a clean
+     CSV, e.g. for a ship-track gravimeter/magnetometer log).
+2. *(optional)* Merging many per-line/per-tile files from one survey into a
+   single importable grid → **`build_geomapapp_mosaics.py`** for a
+   `GMRT_regional/`-style dataset folder (see its own caveat below — it's a
+   template more than a drop-in tool at this point), or the older
+   **`mosaic_geomapapp_grids.py`** for a folder of per-survey-line grids.
+3. Confirm it worked: **`inspect_gmrt.py`** / **`validate_gmrt.py`** (before
+   renaming) or **`validate_xyz.py`** (after) — read-only, safe to run on
+   anything, any time.
+4. Open the output `.grd`/`.tif` in GeoMapApp. If it still won't import,
+   check the variable names are `x`/`y`/`z` specifically — GeoMapApp's
+   classic-grid reader rejects anything else with a generic "header
+   min/max ... not NaN" error that looks like corruption but isn't.
+
+### Job C — I want to add a new dataset as a layer in the 3D viewer
+
+1. Get the source grid/GeoTIFF ready first:
+   - If it's a **projected CRS GeoTIFF** (e.g. UTM), reproject to EPSG:4326
+     first — **`crop_reproject_doa_etp.py`** (change `SRC`/`DST`/the bbox;
+     the pattern generalizes beyond its original DOA-ETP use case).
+   - If it's a **bathymetry grid with known bad-data spikes** (this has come
+     up twice already, in two unrelated datasets — see "Known data-quality
+     issues" in [`Viewer3D/README.md`](../Viewer3D/README.md)) → run the
+     relevant one-off fixer first: `fix_gmrt_spikes.py` or
+     `fix_mittelstaedt_bath_spikes.py`. Only relevant to those two specific
+     files unless a new dataset turns out to have the same problem.
+   - Otherwise a `.grd` (classic NetCDF3 *or* GMT's newer NetCDF4/HDF5
+     variant — auto-detected, no flag needed) or an EPSG:4326 GeoTIFF can go
+     straight into the next step.
+2. Build the mesh:
+   - **Bathymetry/backscatter** → **`build_cesium_mesh.py`**
+   - **Geophysics** (gravity, magnetics, etc., draped over existing terrain)
+     → **`build_geophysics_drape.py`**
+   - Both write straight into `Viewer3D/data/` and register themselves in
+     `Viewer3D/data/manifest.json` — full flag reference in
+     [`Viewer3D/README.md`](../Viewer3D/README.md).
+3. Open the viewer (Job A) and confirm the new layer shows up, at the right
+   place and the right way up — cross-check against a dataset you already
+   trust if anything looks off (see `Viewer3D/README.md`'s "Known
+   data-quality issues" for how past orientation bugs were actually caught).
+
+### Starting completely from scratch (no local data at all)
+
+Do Job B's step 1 once per raw file you pull, as you pull it — there's no
+single "run everything" script, because which fixer a given file needs
+depends on where it came from. `extract_geomapapp_layers.py` is the one
+exception worth running first if you're working from the cruise's own HMRG
+data transfer archive (see the root `README.md`'s "Data" section) — it
+pulls out just the bathymetry/backscatter members without extracting
+everything else in the archive, and needs no environment at all.
+
 ## What each script does
 
+Grouped by the job it belongs to above, not alphabetically.
+
+### Setup & environment
 - **`extract_geomapapp_layers.py`** — pulls just the bathymetry/backscatter
   `.grd`/`.tif` members out of a large cruise data-transfer archive, without
   extracting unrelated nav-plot/metadata files. Stdlib only, no environment
@@ -62,24 +155,52 @@ works with no environment and no internet at all.
 - **`netcdf_lite.py`** — vendored pure-Python/numpy NetCDF3 reader/writer
   (trimmed from SciPy), imported by most scripts below to read/write
   GMT-style `.grd` files without a GMT install. Not run directly.
-- **`mosaic_geomapapp_grids.py`** — merges many per-survey-line grids into
-  one combined mosaic grid, so a viewer can load a single file instead of
-  hundreds of per-line ones. Needs numpy.
-- **`inspect_gmrt.py`** — prints shape/extent/resolution for one or more
-  GMRT-style grids (`lon`/`lat`/`altitude` variables), read-only, mmap-based
-  so it doesn't load the full array into memory. Needs numpy.
-- **`validate_gmrt.py`** — checks a GMRT-style grid's computed min/max
-  against its header `actual_range` and counts NaNs. Needs numpy.
-- **`grd_to_float32.py`** — downcasts a GMRT grid's `altitude` variable from
-  float64 to float32 in place (roughly halves file size). Needs numpy.
+
+### Getting a grid GeoMapApp-ready (Job B)
+- **`fix_mgds_grid.py`** — general-purpose fixer for grids pulled from
+  MGDS: handles old-style GMT grids, modern grids with 0–360° longitude,
+  and ESRI ASCII (`.asc`) grids; auto-detects geographic vs. projected
+  coordinates; writes either a GeoMapApp-ready `.grd` (geographic) or a
+  GeoTIFF with `--epsg <code>` baked in (projected/UTM). Prefer this over
+  `gmt_grd_to_geotiff.py` or `gmrt_to_xyz.py` for any new MGDS pull. Needs
+  numpy, scipy, tifffile.
 - **`gmrt_to_xyz.py`** — renames a GMRT grid's variables from
   `lon`/`lat`/`altitude` to the classic GMT `x`/`y`/`z` convention that
   GeoMapApp's grid reader requires (no value changes). Fixes GeoMapApp's
   "header min/max values are valid numbers and not NaN" error when the real
   cause is variable naming, not corruption. Needs numpy.
-- **`validate_xyz.py`** — same check as `validate_gmrt.py`, for grids
-  already in `x`/`y`/`z` convention (run after `gmrt_to_xyz.py`). Needs
-  numpy.
+- **`grd_to_float32.py`** — downcasts a GMRT grid's `altitude` variable from
+  float64 to float32 in place (roughly halves file size). Needs numpy.
+- **`gmt_grd_to_geotiff.py`** — converts an old-style GMT grid
+  (`x_range`/`y_range`/`z_range`, no CF conventions) to a standard GeoTIFF
+  with an EPSG code baked in. Needed only for an old MATLAB-`write_gmt`
+  style file in a projected/UTM CRS. Needs numpy, scipy, tifffile.
+- **`ascii_xyz_to_grd.py`** — converts a plain ASCII lon/lat/value text
+  file (`.txt`/`.txt.gz`) to a NetCDF `.grd` if the points form a regular
+  grid (then `build_cesium_mesh.py` reads it directly), or to a clean CSV
+  if they don't (e.g. a gravimeter/magnetometer log along a ship track —
+  scattered, not a grid, and this script detects and respects that rather
+  than forcing one). No extra dependency beyond `netcdf_lite.py`.
+- **`mosaic_geomapapp_grids.py`** — merges many per-survey-line grids into
+  one combined mosaic grid, so a viewer can load a single file instead of
+  hundreds of per-line ones. Needs numpy.
+- **`build_geomapapp_mosaics.py`** — merges every dataset folder under
+  `GMRT_regional/` into a single-file, GeoMapApp-ready mosaic, reusing
+  `fix_mgds_grid.py`'s readers (not rasterio/GDAL — GDAL's netCDF driver
+  silently fails to auto-detect these files' coordinate variables, which
+  looks like a georeferencing bug but isn't). **Caveat:** `main()` is
+  hardcoded to this project's current `GMRT_regional/` folder layout and
+  file list, not a general CLI tool — and it predates two things the
+  GeoMapApp-ready output actually needs now: a flat one-file-per-dataset
+  layout (no subfolders) and the Mittelstaedt/DRFT04RR-backscatter
+  datasets, which need extra steps this script doesn't do (HDF5 grid
+  reading via `rasterio`, UTM→geographic reprojection). Treat it as a
+  worked template — its two reusable functions,
+  `mosaic_geo_grids()`/`write_geomapapp_twin()`, are the part worth
+  importing into a short ad hoc script for anything it doesn't already
+  cover, rather than editing `main()` itself. Needs numpy, scipy.
+
+### Adding a layer to the 3D viewer (Job C)
 - **`build_cesium_mesh.py`** — turns one or more bathymetry `.grd` or `.tif`
   files (plus an optional co-registered backscatter `.grd` — GeoTIFF
   backscatter isn't supported yet) into the decimated binary mesh + JSON
@@ -97,6 +218,13 @@ works with no environment and no internet at all.
   grid's elevation for 3D display, and writes the mesh/metadata format
   `Viewer3D/app.js` expects. See `Viewer3D/README.md` for usage. Needs
   numpy.
+- **`crop_reproject_doa_etp.py`** — crops a GeoTIFF to a lon/lat bounding
+  box and reprojects it to EPSG:4326 via a memory-safe streaming
+  `WarpedVRT` read (never materialises the full array) — written for the
+  DOA-ETP regional MBES compilation (EPSG:3395 World Mercator) but the
+  pattern generalizes to any projected-CRS GeoTIFF; change `SRC`/`DST`/the
+  bbox. See `Viewer3D/README.md`'s "Reading other formats". Needs
+  rasterio, pyproj.
 - **`fix_gmrt_spikes.py`** — one-off repair for the Wolf/Darwin Island
   bad-data spikes baked into GMRT's own synthesis of
   `GMRT_corridor_basemap.grd` (mask + Laplacian inpaint, tightly scoped to
@@ -112,37 +240,6 @@ works with no environment and no internet at all.
   `CUT_bath_clean.tif` (GeoTIFF, not another `.grd` — this project can only
   *read* NetCDF4/HDF5, not write it). See `Viewer3D/README.md`'s "Known
   data-quality issues". Needs numpy, scipy, rasterio.
-- **`crop_reproject_doa_etp.py`** — crops a GeoTIFF to a lon/lat bounding
-  box and reprojects it to EPSG:4326 via a memory-safe streaming
-  `WarpedVRT` read (never materialises the full array) — written for the
-  DOA-ETP regional MBES compilation (EPSG:3395 World Mercator) but the
-  pattern generalizes to any projected-CRS GeoTIFF; change `SRC`/`DST`/the
-  bbox. See `Viewer3D/README.md`'s "Reading other formats". Needs
-  rasterio, pyproj.
-- **`segy_inspect.py`** — reads a SEGY seismic file's headers (trace count,
-  sample rate, record length, shot-point coordinate range) without loading
-  trace data; can export the shot-point track as CSV. Cataloging tool only
-  — SEGY is traces along a track, not a grid, so it can't become a
-  bathymetry mesh. Needs segyio.
-- **`ascii_xyz_to_grd.py`** — converts a plain ASCII lon/lat/value text
-  file (`.txt`/`.txt.gz`) to a NetCDF `.grd` if the points form a regular
-  grid (then `build_cesium_mesh.py` reads it directly), or to a clean CSV
-  if they don't (e.g. a gravimeter/magnetometer log along a ship track —
-  scattered, not a grid, and this script detects and respects that rather
-  than forcing one). No extra dependency beyond `netcdf_lite.py`.
-- **`gmt_grd_to_geotiff.py`** — converts an old-style GMT grid
-  (`x_range`/`y_range`/`z_range`, no CF conventions) to a standard GeoTIFF
-  with an EPSG code baked in. Needed only for an old MATLAB-`write_gmt`
-  style file in a projected/UTM CRS. Needs numpy, scipy, tifffile.
-- **`fix_mgds_grid.py`** — general-purpose fixer for grids pulled from
-  MGDS: handles old-style GMT grids, modern grids with 0–360° longitude,
-  and ESRI ASCII (`.asc`) grids; auto-detects geographic vs. projected
-  coordinates; writes either a GeoMapApp-ready `.grd` (geographic) or a
-  GeoTIFF with `--epsg <code>` baked in (projected/UTM). Produced every
-  `*_geomapapp.grd`/`.tif` file under `GMRT_regional/`. Prefer this over
-  `gmt_grd_to_geotiff.py` or `gmrt_to_xyz.py` for any new MGDS pull. Needs
-  numpy, scipy, tifffile.
-
 - **`terrain_derivatives.py`** — slope magnitude, downslope direction
   (azimuth clockwise from north), and seafloor roughness (Wilson TRI,
   plane-detrended std-dev at several window sizes, Vector Ruggedness Measure)
@@ -163,24 +260,22 @@ works with no environment and no internet at all.
   otherwise-valid input; `imagecodecs` is in `requirements.txt` so
   `setup_env.sh` already covers it.
 
-## Suggested order, starting from scratch
+### Diagnostics (safe to run any time, on any matching grid)
+- **`inspect_gmrt.py`** — prints shape/extent/resolution for one or more
+  GMRT-style grids (`lon`/`lat`/`altitude` variables), read-only, mmap-based
+  so it doesn't load the full array into memory. Needs numpy.
+- **`validate_gmrt.py`** — checks a GMRT-style grid's computed min/max
+  against its header `actual_range` and counts NaNs. Needs numpy.
+- **`validate_xyz.py`** — same check as `validate_gmrt.py`, for grids
+  already in `x`/`y`/`z` convention (run after `gmrt_to_xyz.py`). Needs
+  numpy.
 
-Most of these are independent, run-as-needed utilities, not a fixed
-pipeline — but a reasonable order when building everything up from source
-data is:
-
-1. `./setup_env.sh` (once per machine), then run scripts as `venv/bin/python3 <script>.py` (see "One-time setup" above for why not `source venv/bin/activate`)
-2. `extract_geomapapp_layers.py` against the cruise's own data transfer, if
-   working with that dataset (see the root `README.md`'s Data section)
-3. *(optional)* `mosaic_geomapapp_grids.py` on the extracted per-line
-   folders, for one combined grid instead of one file per survey line
-4. For any new MGDS pull: `fix_mgds_grid.py` on each downloaded grid
-5. For any new GMRT pull: `grd_to_float32.py` then `gmrt_to_xyz.py`, then
-   `validate_xyz.py` to confirm
-6. `inspect_gmrt.py` / `validate_gmrt.py` / `validate_xyz.py` are read-only
-   diagnostics — run any of them any time, on any matching grid
-7. `build_cesium_mesh.py` / `build_geophysics_drape.py` to add a dataset to
-   the 3D viewer (see `Viewer3D/README.md`)
+### Other formats
+- **`segy_inspect.py`** — reads a SEGY seismic file's headers (trace count,
+  sample rate, record length, shot-point coordinate range) without loading
+  trace data; can export the shot-point track as CSV. Cataloging tool only
+  — SEGY is traces along a track, not a grid, so it can't become a
+  bathymetry mesh. Needs segyio.
 
 Every script supports `--help` (the older mmap-based inspector/validator
 scripts just take a list of file paths as plain arguments) — run with no
