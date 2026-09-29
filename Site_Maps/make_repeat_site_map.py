@@ -22,8 +22,8 @@ import pandas as pd
 from matplotlib.backends.backend_pdf import PdfPages
 from matplotlib.lines import Line2D
 
-from make_previous_dredge_maps import (GLASS_C, PERMIT_C, bathy, colorbar, compile_previous, draw_previous_glass,
-                                       overlay_cut50, short_id)
+from make_previous_dredge_maps import GLASS_C, PERMIT_C, compile_previous, draw_previous_glass, overlay_cut50, short_id
+from make_site_maps import bathy
 from make_site_maps import HERE, PC, SITES, haversine_km, load_gmrt, place_labels
 
 REPEAT_KM = 2.0     # permit site within this distance of a poor MV1007 dredge -> flagged

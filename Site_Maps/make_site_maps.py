@@ -12,6 +12,8 @@ Inputs (all in this repository):
 Outputs (Site_Maps/):
   Dredge_Sites_Map.{png,pdf}, MT_Sites_Map.{png,pdf}, Combined_Sites_Map.{png,pdf}
       Bathymetry + sites only. The PDFs add coordinate-table pages after the map.
+      Bathymetry: cmocean 'deep' with a depth colour bar; the colour range is the site depths
+      on that map +/- 300 m (site_depth_range), so the ramp spans the depths that matter.
   *_Reserves_Map.{png,pdf}
       Same three maps with the Galapagos and Hermandad marine-reserve zones filled
       and labelled, plus an overview inset showing both reserves in full.
@@ -42,7 +44,7 @@ import cartopy.crs as ccrs
 import matplotlib.patheffects as pe
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.colors import LightSource, LinearSegmentedColormap
+from matplotlib.colors import LightSource
 
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent
@@ -147,29 +149,56 @@ def build_table(kind, rmg, rmh, glon, glat, gz):
 
 
 # ---------------------------------------------------------------- drawing
-def basemap(ax, glon, glat, gz, extent):
+def site_depth_range(*depths, margin=300.0, step=250.0, pct=None):
+    """Colour range for the bathymetry: the depths of the sites on the map plus a margin,
+    rounded to `step`, so the whole colour ramp spans the depths that matter here
+    (shallower/deeper seafloor saturates to the end colours). pct=(lo, hi) uses those
+    percentiles of the site depths instead of min/max, so a few outlying sites (e.g. a
+    400 m summit dredge among 2000 m ones) don't flatten the contrast for the rest."""
+    d = np.concatenate([np.abs(np.asarray(x, float)) for x in depths])
+    d = d[np.isfinite(d)]
+    lo, hi = (d.min(), d.max()) if pct is None else np.percentile(d, pct)
+    return (max(0.0, np.floor((lo - margin) / step) * step), np.ceil((hi + margin) / step) * step)
+
+
+def bathy(ax, glon, glat, gz, extent, vrange=None):
+    """Depth coloured with cmocean 'deep' (pale = shallow, dark = deep) over a hillshade, 500 m
+    isobaths, land grey-brown. vrange defaults to the 2-98th percentile of ocean depth in view.
+    Returns (cmap, norm) for colorbar()."""
+    import cmocean
+    from matplotlib.colors import Normalize
     ax.set_extent(extent, crs=PC)
-    ocean = LinearSegmentedColormap.from_list("ocean", ["#08306b", "#2171b5", "#6baed6", "#c6dbef"])
-    land = LinearSegmentedColormap.from_list("land", ["#d9d0b4", "#a89f7e", "#6f6650"])
-    ls = LightSource(azdeg=315, altdeg=40)
+    depth = -gz
+    ocean = depth > 0
+    if vrange is None:
+        lo, hi = np.nanpercentile(depth[ocean], [2, 98])
+        vrange = (np.floor(lo / 250) * 250, np.ceil(hi / 250) * 250)
+    cmap, norm = cmocean.cm.deep, Normalize(*vrange)
     dx = 111_320 * np.cos(np.radians(glat.mean())) * (glon[1] - glon[0])
     dy = 111_320 * (glat[1] - glat[0])
-    hs = ls.hillshade(np.nan_to_num(gz, nan=-3000), vert_exag=4, dx=dx, dy=dy)
-    zc = np.clip(gz, -4000, 0)
-    rgb = ocean((zc + 4000) / 4000)[..., :3]
-    lm = gz > 0
-    rgb[lm] = land(np.clip(gz[lm] / 1700, 0, 1))[:, :3]
-    rgb = rgb * (0.55 + 0.45 * hs[..., None])
-    ext = [glon[0], glon[-1], glat[0], glat[-1]]
-    ax.imshow(rgb, origin="lower", extent=ext, transform=PC, interpolation="bilinear", zorder=0)
-    cs = ax.contour(glon, glat, gz, levels=np.arange(-4000, 0, 500), colors="white", linewidths=0.3,
-                    alpha=0.45, transform=PC, zorder=1)
-    ax.clabel(cs, levels=[-3000, -2000, -1000], fmt=lambda v: f"{-v:.0f}", fontsize=5.5, colors="white")
-    ax.contour(glon, glat, gz, levels=[0], colors="0.2", linewidths=0.6, transform=PC, zorder=1)
-    gl = ax.gridlines(draw_labels=True, linewidth=0.3, color="0.3", alpha=0.5, linestyle=":",
-                      x_inline=False, y_inline=False)
+    hs = LightSource(azdeg=315, altdeg=40).hillshade(np.nan_to_num(gz, nan=-3000), vert_exag=3, dx=dx, dy=dy)
+    rgb = cmap(norm(np.clip(depth, *vrange)))[..., :3]
+    rgb[~ocean] = np.array([0.72, 0.68, 0.60])
+    rgb = rgb * (0.6 + 0.4 * hs[..., None])
+    ax.imshow(np.clip(rgb, 0, 1), origin="lower", extent=[glon[0], glon[-1], glat[0], glat[-1]], transform=PC,
+              interpolation="bilinear", zorder=0)
+    ax.contour(glon, glat, gz, levels=np.arange(-5000, 0, 500), colors="k", linewidths=0.25, alpha=0.35,
+               transform=PC, zorder=1)
+    ax.contour(glon, glat, gz, levels=[0], colors="0.15", linewidths=0.6, transform=PC, zorder=1)
+    gl = ax.gridlines(draw_labels=True, linewidth=0.3, color="0.3", alpha=0.5, linestyle=":")
     gl.top_labels = gl.right_labels = False
     gl.xlabel_style = gl.ylabel_style = {"size": 8}
+    return cmap, norm
+
+
+def colorbar(fig, ax, cmap, norm):
+    """Vertical depth colour bar just right of the map axes, shallow at the top."""
+    bb = ax.get_position()
+    cax = fig.add_axes([bb.x1 + 0.008, bb.y0 + 0.1 * bb.height, 0.012, 0.8 * bb.height])
+    cb = fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), cax=cax, extend="both")
+    cb.set_label("Water depth (m)", fontsize=9)
+    cb.ax.invert_yaxis()
+    cb.ax.tick_params(labelsize=8)
 
 
 ZONES = [  # (key, label, fill, edge, linestyle, alpha)
@@ -314,7 +343,7 @@ def legend(fig, kinds, with_reserves, anchor=(0.52, 0.03), loc="lower center", n
     if with_reserves:
         h += [Patch(facecolor=fc, alpha=a + 0.1, edgecolor=ec, ls=ls, lw=1.4, label=lab)
               for _, lab, fc, ec, ls, a in ZONES]
-    h.append(Line2D([], [], color="0.55", lw=0.6, label="Isobaths every 500 m (white on map)"))
+    h.append(Line2D([], [], color="k", lw=0.4, alpha=0.5, label="500 m isobaths"))
     fig.legend(handles=h, loc=loc, bbox_to_anchor=anchor, ncol=ncol, fontsize=7.5, frameon=False)
 
 
@@ -353,13 +382,15 @@ def table_pages(pdf, t, title, rows_per_page=34):
 
 
 def make_map(name, title, tables, extent, glon, glat, gz, rmg, rmh, fonts, with_reserves=False, overview=None):
-    W, AXW = 11.0, 0.9
+    W, AXW = 11.0, 0.85  # leaves room for the depth colour bar
     map_h = W * AXW * (extent[3] - extent[2]) / (extent[1] - extent[0])  # PlateCarree: 1 deg = 1 deg
     band = 3.3 if with_reserves else 1.0  # inches below the map: legend (+ overview inset)
     H = map_h + band + 0.35
     fig = plt.figure(figsize=(W, H))
     ax = fig.add_axes([0.07, band / H, AXW, map_h / H], projection=PC)
-    basemap(ax, glon, glat, gz, extent)
+    cmap, norm = bathy(ax, glon, glat, gz, extent,
+                       vrange=site_depth_range(*[t.depth_listed_m for t in tables.values()]))
+    colorbar(fig, ax, cmap, norm)
     site_ll = np.vstack([t[["lon_dd", "lat_dd"]].values for t in tables.values()])
     if with_reserves:
         reserves(ax, rmg, rmh, extent, site_ll)
@@ -382,7 +413,7 @@ def make_map(name, title, tables, extent, glon, glat, gz, rmg, rmh, fonts, with_
         legend(fig, list(tables), True, anchor=(0.07, (band - 0.45) / H), loc="upper left", ncol=2)
         ih = 2.45  # inset height in inches; overview aspect is 8.2 deg x 6.9 deg
         iw = ih * 8.2 / 6.9
-        overview_inset(fig, [0.97 - iw / W, 0.4 / H, iw / W, ih / H], extent, rmg, rmh, *overview, site_ll)
+        overview_inset(fig, [0.93 - iw / W, 0.4 / H, iw / W, ih / H], extent, rmg, rmh, *overview, site_ll)
     else:
         legend(fig, list(tables), False, anchor=(0.52, 0.3 / H))
     fig.text(0.07, 0.012, "Basemap: GMRT synthesis (Ryan et al., 2009), spike-repaired (scripts/fix_gmrt_spikes.py). "
