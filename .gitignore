@@ -45,3 +45,14 @@ __pycache__/
 # Windows/exFAT external-drive metadata folders
 $RECYCLE.BIN/
 System Volume Information/
+
+# Old Viewer3D UI, superseded by Viewer3D_NewLayout/ -- kept on disk (and
+# Viewer3D_NewLayout/cesium|data still symlink to Viewer3D/'s own copies of
+# those), just no longer tracked on GitHub. Viewer3D/README.md stays tracked
+# -- it's the fuller dataset/setup reference, not duplicated elsewhere.
+Viewer3D/app.js
+Viewer3D/index.html
+Viewer3D/style.css
+Viewer3D/run_viewer.py
+Viewer3D/Combined_Cruise_Sites_Robust.csv
+Viewer3D/test_track_points.csv

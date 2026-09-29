@@ -1,14 +1,14 @@
 # Viewer3D_NewLayout
 
-An experimental copy of `Viewer3D/`, laid out around a dedicated
-profile/colourbar workflow closer to what standalone bathymetry-processing
-tools offer. **The original `Viewer3D/` is untouched** -- this folder is a
-separate, parallel viewer, not a replacement.
+The primary 3D viewer for this project going forward. It started as an
+experimental layout variant of `Viewer3D/` and has now replaced it as the
+one to use day to day -- see "About `Viewer3D/`" below for what that means
+in practice.
 
-Open it the same way: `python3 run_viewer.py` from inside this folder (or
-just serve/open `index.html` the way you already do for `Viewer3D/`).
+Open it the same way as before: `python3 run_viewer.py` from inside this
+folder.
 
-## What's different from `Viewer3D/`
+## What's different from the original `Viewer3D/` layout
 
 - **Cross-section profiles moved out of the sidebar.** Pick two points the
   same way (the "Pick 2 points" / "Clear" buttons are still in the left
@@ -29,19 +29,36 @@ just serve/open `index.html` the way you already do for `Viewer3D/`).
   colourbar puts it back to the full data range. This also means a GeoTIFF
   colour export picks up whatever window is currently set, since it's
   drawn from the same re-tinted mesh colours.
+- **Track points: multi-file upload, shaped by site type.** The "Track
+  points" panel's file picker now takes more than one CSV at once (hold
+  Ctrl/Cmd, or drag-select, in the file dialog) -- select
+  `MT_dredging_coords/MTsites.csv` and `DredgeSites.csv` together, for
+  example, and both show up at the same time. Marker **shape** comes from
+  the file name, not a column: a file name containing "dredge" plots as a
+  plain circle, a file name containing "mt" (as a whole word, e.g.
+  `MTsites.csv`) plots as a diamond; anything else defaults to a circle.
+  Marker **colour** comes from each row's `status` column: `to do` is
+  orange, `done` (or anything else/blank) is grey. Selecting a new set of
+  files replaces whatever was loaded before, same as the original
+  single-file behaviour.
 
 ## What's identical
 
-Everything else -- dataset list, exaggeration, lighting, track points,
-GeoTIFF export, the underlying data -- works exactly like `Viewer3D/`. The
-`cesium/` and `data/` folders aren't duplicated; they're symlinked back to
-`Viewer3D/`'s own copies, so this folder adds only a few hundred KB on
-disk, not another several GB.
+Everything else -- dataset list, exaggeration, lighting, GeoTIFF export,
+the underlying data -- works the same as it always has. The `cesium/` and
+`data/` folders aren't duplicated; they're symlinked to `Viewer3D/`'s own
+copies (see below), so this folder is a few hundred KB on disk, not
+another several GB.
 
-## Why a separate copy
+## About `Viewer3D/`
 
-This layout is a genuine change in how the tool is used (bottom dock vs.
-sidebar, draggable re-windowing) and hasn't had the same amount of real-use
-mileage as `Viewer3D/` yet. Keeping it separate means it can be tried out,
-and iterated on further, without any risk to the viewer you already rely
-on day to day.
+The original, sidebar-only layout still exists as a local-only folder --
+it's no longer tracked in this GitHub repository, but it isn't deleted:
+it's still sitting on the shared drive exactly as before, and this
+folder's `cesium/` (vendored CesiumJS build) and `data/` (built meshes)
+are still symlinks pointing at it, so removing it from GitHub changes
+nothing about how `Viewer3D_NewLayout/` runs. It's kept locally as a
+reference/fallback, not because anything still depends on its own
+`app.js`/`index.html`/`style.css` -- those are no longer maintained.
+Someone who clones this repository fresh from GitHub will only see this
+folder, not `Viewer3D/`.

@@ -12,7 +12,8 @@ and is not versioned in this repository.
 | Path | Contents |
 |---|---|
 | `GMRT_regional/` | Individual-cruise bathymetry, backscatter, gravity, magnetics, and seismic products for the wider corridor, pulled from the Marine Geoscience Data System (MGDS), plus a regional GMRT basemap grid. See [`GMRT_regional/README.md`](GMRT_regional/README.md). |
-| `Viewer3D/` | Offline, self-contained 3D viewer (CesiumJS) for exploring the bathymetry, backscatter, and geophysics layers together. See [`Viewer3D/README.md`](Viewer3D/README.md). |
+| `Viewer3D_NewLayout/` | The offline, self-contained 3D viewer (CesiumJS) to actually use -- bathymetry, backscatter, geophysics layers, and cruise-site track points (dredge/MT, shaped and coloured by status) together. See its own [`README.md`](Viewer3D_NewLayout/README.md) for what it adds on top of the original layout, and [`Viewer3D/README.md`](Viewer3D/README.md) for the full dataset/setup reference both viewers share. |
+| `Viewer3D/` | The original viewer layout. Superseded by `Viewer3D_NewLayout/` and no longer tracked here -- kept locally only (see `Viewer3D_NewLayout/README.md`'s "About `Viewer3D/`"). Its `README.md` stays in this repo since it's the fuller technical reference (dataset table, known data-quality issues, setup) that `Viewer3D_NewLayout/` doesn't duplicate. |
 | `scripts/` | Python tooling for extracting, converting, validating, and meshing the datasets referenced above. See [`scripts/README.md`](scripts/README.md). |
 | `DATA_MANIFEST.md` | Every dataset this project uses: source, identifier, format, size, and how to (re)obtain it. |
 

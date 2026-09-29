@@ -84,11 +84,11 @@
 
     <div class="control-group">
       <label>Track points (CSV upload)</label>
-      <input type="file" id="trackCsvInput" accept=".csv,text/csv">
+      <input type="file" id="trackCsvInput" accept=".csv,text/csv" multiple>
       <div class="track-buttons">
         <button id="clearTrackBtn">Clear points</button>
       </div>
-      <div id="trackStatus" class="hint-text">Upload a CSV with lat/lon columns (optional name/label column, optional status column -- see legend below). Points snap onto the currently-visible seafloor surface.</div>
+      <div id="trackStatus" class="hint-text">Select one or more CSVs at once (e.g. MTsites.csv + DredgeSites.csv from MT_dredging_coords/) -- lat/lon columns required, status column optional. Marker shape comes from the file name ("dredge"/"mt"); colour comes from status. Points snap onto the currently-visible seafloor surface.</div>
       <div id="trackLegend" class="track-legend"></div>
     </div>
 

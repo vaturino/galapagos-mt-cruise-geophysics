@@ -465,6 +465,40 @@ input[type="range"] {
   display: inline-block;
 }
 
+/* Shape-only legend swatches (Track points "Type" group) -- transparent
+   fill with just an outline, since these rows convey shape, not colour;
+   colour is already covered by the "Status" group above them. */
+.track-legend-swatch--circle {
+  background: transparent;
+  border-radius: 50%;
+  border: 1.5px solid #d3d9df;
+}
+
+.track-legend-swatch--diamond {
+  background: transparent;
+  border-radius: 0;
+  border: 1.5px solid #d3d9df;
+  transform: rotate(45deg);
+  /* rotating a square shrinks its visual footprint vs. the circle above it
+     (its corners point out where the circle's edge already sits) -- a touch
+     larger before rotating keeps the two swatches reading as the same size */
+  width: 9px;
+  height: 9px;
+}
+
+.track-legend-heading {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #8f98a3;
+  margin-top: 8px;
+}
+
+.track-legend-heading:first-child {
+  margin-top: 0;
+}
+
 #loading {
   position: absolute;
   inset: 0;

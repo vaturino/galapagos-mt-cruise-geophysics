@@ -124,8 +124,9 @@ const state = {
   colorMode: "depth",
   lightingEnabled: true,
   camera: { heading: 0, pitch: -35, rangeScale: 2.2 }, // heading/pitch in degrees
-  trackPoints: [], // { lonDeg, latDeg, label, cartesian }
-  trackPointCollection: null,
+  trackPoints: [], // { lonDeg, latDeg, label, status, kind, cartesian }
+  trackPointCollection: null, // Cesium.PointPrimitiveCollection -- "dredge" points (plain circles)
+  trackBillboardCollection: null, // Cesium.BillboardCollection -- "mt" points (diamond icon, no other shape option on a PointPrimitive)
   crossSection: {
     armed: false, // true while waiting for the next surface click to place A or B
     pointA: null, // { lonDeg, latDeg, cartesian }
@@ -963,26 +964,67 @@ function updateLegend() {
 // Track points (CSV upload, placed on the current seafloor surface)
 // =====================================================================
 
-// Fixed status -> colour mapping for an optional "status" column (dredging/MT
-// to-do/done). Order and hex values are the palette-validated set (four
-// categorical slots chosen from the standard 8-hue theme, re-ordered so the
-// four land on colour-blind-safe steps together -- see README_Viewer3D.md's
-// "Track point status colours" section for the validator output). Assigned
-// in this fixed order, never cycled/generated, per the usual categorical
-// colour rule -- a 5th status would need a 5th validated slot, not a
-// reused/derived hue. Keys are lower-cased for matching against the CSV.
+// Status -> colour: just two states, "to do" (still outstanding) and "done"
+// (grey, deliberately -- greyed-out reads as complete/inactive at a glance).
+// One validated slot from the standard categorical theme for "to do"; an
+// unrecognised status value reads the same as "done" rather than getting a
+// third colour, since "not one of the two we track" and "done" both mean
+// "not something to act on right now". Keys are lower-cased for matching
+// against the CSV.
 const TRACK_STATUS_COLORS = [
-  { key: "dredging to do", hex: "#2a78d6" }, // blue
-  { key: "dredging done", hex: "#eb6834" }, // orange
-  { key: "mt to do", hex: "#1baf7a" }, // aqua
-  { key: "mt done", hex: "#4a3aa7" }, // violet
+  { key: "to do", hex: "#eb6834" }, // orange -- still outstanding
+  { key: "done", hex: "#9aa7b2" }, // grey -- completed
 ];
-const TRACK_STATUS_FALLBACK_HEX = "#9aa7b2"; // neutral grey -- missing/unrecognised status, not one of the four
+const TRACK_STATUS_FALLBACK_HEX = "#9aa7b2"; // same grey as "done" -- missing/unrecognised status
 const TRACK_STATUS_LOOKUP = new Map(TRACK_STATUS_COLORS.map((s) => [s.key, s.hex]));
 
 function trackStatusColor(status) {
   if (!status) return TRACK_STATUS_FALLBACK_HEX;
   return TRACK_STATUS_LOOKUP.get(status.trim().toLowerCase()) || TRACK_STATUS_FALLBACK_HEX;
+}
+
+// Marker SHAPE is decided by the uploaded file's own name, not a CSV column
+// -- site lists are one file per site type (MTsites.csv, DredgeSites.csv,
+// as they're actually named in MT_dredging_coords/ on the shared drive), so
+// the filename is the reliable signal. "dredge" is checked first since it's
+// an unambiguous word; "mt" is matched as a whole word/token (not just any
+// filename containing the letters "mt") to avoid false positives.
+function detectTrackKind(filename) {
+  const name = filename.toLowerCase();
+  if (name.includes("dredge")) return "dredge";
+  if (/(^|[^a-z])mt([^a-z]|$)/.test(name)) return "mt";
+  return "dredge"; // unrecognised filename -- default to the plain circle marker
+}
+
+// Cesium's PointPrimitiveCollection (used for "dredge" points, below) only
+// ever renders a circle -- there's no shape option on it. A genuinely
+// different "MT" marker needs a Billboard with a hand-drawn icon instead.
+// Drawn once per status colour and cached (a handful of colours total, not
+// one canvas per point).
+const trackDiamondIconCache = new Map();
+function getTrackDiamondIcon(hex) {
+  if (trackDiamondIconCache.has(hex)) return trackDiamondIconCache.get(hex);
+  const size = 20;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext("2d");
+  const mid = size / 2;
+  const r = size / 2 - 2;
+  ctx.beginPath();
+  ctx.moveTo(mid, mid - r);
+  ctx.lineTo(mid + r, mid);
+  ctx.lineTo(mid, mid + r);
+  ctx.lineTo(mid - r, mid);
+  ctx.closePath();
+  ctx.fillStyle = hex;
+  ctx.fill();
+  // dark outline, matching the circle markers' outline treatment
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = "#0b0b0b";
+  ctx.stroke();
+  trackDiamondIconCache.set(hex, canvas);
+  return canvas;
 }
 
 function hexToRgb(hex) {
@@ -994,22 +1036,46 @@ function buildTrackLegend() {
   const container = document.getElementById("trackLegend");
   if (!container) return;
   container.innerHTML = "";
-  const rows = [...TRACK_STATUS_COLORS, { key: "(other/unrecognised)", hex: TRACK_STATUS_FALLBACK_HEX, isFallback: true }];
-  for (const { key, hex, isFallback } of rows) {
+
+  const statusHeading = document.createElement("div");
+  statusHeading.className = "track-legend-heading";
+  statusHeading.textContent = "Status";
+  container.appendChild(statusHeading);
+  for (const { key, hex } of TRACK_STATUS_COLORS) {
     const row = document.createElement("div");
     row.className = "track-legend-row";
     const swatch = document.createElement("span");
     swatch.className = "track-legend-swatch";
     swatch.style.background = hex;
     const label = document.createElement("span");
-    label.textContent = isFallback ? key : key.replace(/^mt\b/, "MT").replace(/^\w/, (c) => c.toUpperCase());
+    label.textContent = key.replace(/^\w/, (c) => c.toUpperCase());
     row.appendChild(swatch);
     row.appendChild(label);
     container.appendChild(row);
   }
+
+  const typeHeading = document.createElement("div");
+  typeHeading.className = "track-legend-heading";
+  typeHeading.textContent = "Type (from file name)";
+  container.appendChild(typeHeading);
+  const shapeRows = [
+    { shapeClass: "circle", label: "Dredge \u2014 circle" },
+    { shapeClass: "diamond", label: "MT \u2014 diamond" },
+  ];
+  for (const { shapeClass, label } of shapeRows) {
+    const row = document.createElement("div");
+    row.className = "track-legend-row";
+    const swatch = document.createElement("span");
+    swatch.className = `track-legend-swatch track-legend-swatch--${shapeClass}`;
+    const labelEl = document.createElement("span");
+    labelEl.textContent = label;
+    row.appendChild(swatch);
+    row.appendChild(labelEl);
+    container.appendChild(row);
+  }
 }
 
-function parseTrackCSV(text) {
+function parseTrackCSV(text, kind) {
   const lines = text
     .split(/\r\n|\n|\r/)
     .map((l) => l.trim())
@@ -1043,10 +1109,10 @@ function parseTrackCSV(text) {
     const label = labelIdx >= 0 && cols[labelIdx] ? cols[labelIdx] : `pt${points.length + 1}`;
     const status = statusIdx >= 0 && cols[statusIdx] ? cols[statusIdx] : null;
     if (status && !TRACK_STATUS_LOOKUP.has(status.trim().toLowerCase())) unrecognisedStatuses.add(status);
-    points.push({ latDeg: lat, lonDeg: lon, label, status });
+    points.push({ latDeg: lat, lonDeg: lon, label, status, kind });
   }
   if (unrecognisedStatuses.size > 0) {
-    const extra = `Status value(s) not recognised (shown in grey): ${[...unrecognisedStatuses].slice(0, 4).join(", ")}${unrecognisedStatuses.size > 4 ? ", …" : ""}. Expected one of: dredging to do, dredging done, MT to do, MT done.`;
+    const extra = `Status value(s) not recognised (shown in grey, same as "done"): ${[...unrecognisedStatuses].slice(0, 4).join(", ")}${unrecognisedStatuses.size > 4 ? ", …" : ""}. Expected "to do" or "done".`;
     warning = warning ? `${warning} ${extra}` : extra;
   }
   return { points, warning };
@@ -1056,7 +1122,11 @@ function placeTrackPoints() {
   if (!state.trackPointCollection) {
     state.trackPointCollection = viewer.scene.primitives.add(new Cesium.PointPrimitiveCollection());
   }
+  if (!state.trackBillboardCollection) {
+    state.trackBillboardCollection = viewer.scene.primitives.add(new Cesium.BillboardCollection());
+  }
   state.trackPointCollection.removeAll();
+  state.trackBillboardCollection.removeAll();
   const statusEl = document.getElementById("trackStatus");
   if (state.trackPoints.length === 0) {
     if (statusEl) statusEl.textContent = "";
@@ -1085,17 +1155,27 @@ function placeTrackPoints() {
     }
     carto.height = height;
     pt.cartesian = Cesium.Cartographic.toCartesian(carto);
-    state.trackPointCollection.add({
-      position: pt.cartesian,
-      color: Cesium.Color.fromCssColorString(trackStatusColor(pt.status)),
-      // a dark outline (rather than white) keeps every status colour legible
-      // against both the pale land palette and the bright shallow-water blue
-      // in the basemap underneath -- white washed out on the lightest
-      // terrain colours during testing.
-      outlineColor: Cesium.Color.fromCssColorString("#0b0b0b"),
-      outlineWidth: 1.5,
-      pixelSize: 9,
-    });
+    const hex = trackStatusColor(pt.status);
+    if (pt.kind === "mt") {
+      state.trackBillboardCollection.add({
+        position: pt.cartesian,
+        image: getTrackDiamondIcon(hex),
+        width: 14,
+        height: 14,
+      });
+    } else {
+      state.trackPointCollection.add({
+        position: pt.cartesian,
+        color: Cesium.Color.fromCssColorString(hex),
+        // a dark outline (rather than white) keeps every status colour legible
+        // against both the pale land palette and the bright shallow-water blue
+        // in the basemap underneath -- white washed out on the lightest
+        // terrain colours during testing.
+        outlineColor: Cesium.Color.fromCssColorString("#0b0b0b"),
+        outlineWidth: 1.5,
+        pixelSize: 9,
+      });
+    }
     placed += 1;
   }
   viewer.scene.requestRender();
@@ -1110,19 +1190,29 @@ function placeTrackPoints() {
 }
 
 document.getElementById("trackCsvInput").addEventListener("change", async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const text = await file.text();
-  const { points, warning } = parseTrackCSV(text);
-  state.trackPoints = points;
+  const files = Array.from(e.target.files || []);
+  if (files.length === 0) return;
   const statusEl = document.getElementById("trackStatus");
-  statusEl.textContent = warning ? `${warning} (${points.length} point(s) parsed)` : `${points.length} point(s) loaded from ${file.name}.`;
+  const allPoints = [];
+  const perFileNotes = [];
+  for (const file of files) {
+    const text = await file.text();
+    const kind = detectTrackKind(file.name);
+    const { points, warning } = parseTrackCSV(text, kind);
+    allPoints.push(...points);
+    perFileNotes.push(warning ? `${file.name}: ${warning}` : `${file.name}: ${points.length} point(s) (${kind}).`);
+  }
+  // Selecting a new set of files replaces whatever was loaded before --
+  // select every CSV you want visible together in one file-picker dialog.
+  state.trackPoints = allPoints;
+  if (statusEl) statusEl.textContent = perFileNotes.join(" ");
   placeTrackPoints();
 });
 
 document.getElementById("clearTrackBtn").addEventListener("click", () => {
   state.trackPoints = [];
   if (state.trackPointCollection) state.trackPointCollection.removeAll();
+  if (state.trackBillboardCollection) state.trackBillboardCollection.removeAll();
   document.getElementById("trackStatus").textContent = "";
   document.getElementById("trackCsvInput").value = "";
   viewer.scene.requestRender();
