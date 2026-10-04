@@ -336,6 +336,7 @@ function rebuildAllLoaded() {
   updateStats();
   updateLegend();
   placeTrackPoints();
+  placePrevDredges(true);
   updateCrossSection();
   setLoading(false);
 }
@@ -414,6 +415,7 @@ async function setDatasetVisible(id, visible) {
   updateStats();
   updateLegend();
   placeTrackPoints();
+  placePrevDredges(true);
   updateCrossSection();
   // Only auto-frame when going from "nothing visible" to "something visible" --
   // otherwise this would yank the camera away from wherever you've manually
@@ -1405,6 +1407,7 @@ function placeTrackPoints() {
       width: 16,
       height: 16,
       id: pt,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY, // never half-hidden by the seafloor it sits on
     });
     placed += 1;
   }
@@ -1429,7 +1432,7 @@ function trackTooltipLabel(pt) {
 function showTrackTooltip(pt, windowPosition) {
   const el = document.getElementById("trackTooltip");
   if (!el) return;
-  el.textContent = trackTooltipLabel(pt);
+  el.textContent = pt.prevDredge ? prevTooltipText(pt) : trackTooltipLabel(pt);
   el.style.left = `${windowPosition.x + 14}px`;
   el.style.top = `${windowPosition.y + 14}px`;
   el.style.display = "block";
@@ -1440,7 +1443,8 @@ function hideTrackTooltip() {
 }
 function pickTrackPoint(windowPosition) {
   const picked = viewer.scene.pick(windowPosition);
-  if (Cesium.defined(picked) && picked.id && typeof picked.id === "object" && "kind" in picked.id && "latDeg" in picked.id) {
+  if (Cesium.defined(picked) && picked.id && typeof picked.id === "object" &&
+      (("kind" in picked.id && "latDeg" in picked.id) || picked.id.prevDredge)) {
     return picked.id;
   }
   return null;
@@ -1459,25 +1463,48 @@ trackPickHandler.setInputAction((movement) => {
 document.getElementById("trackCsvInput").addEventListener("change", async (e) => {
   const files = Array.from(e.target.files || []);
   if (files.length === 0) return;
+  const named = [];
+  for (const file of files) named.push([file.name, await file.text()]);
+  e.target.value = ""; // allow re-selecting the same file name later to reload it
+  addTrackCsvs(named);
+});
+
+// [[fileName, csvText], ...] -> track layers (shared by the file picker and the
+// "Load AT53-04 sites" button).
+function addTrackCsvs(named) {
   const statusEl = document.getElementById("trackStatus");
   const perFileNotes = [];
-  for (const file of files) {
-    const text = await file.text();
-    const kind = detectTrackKind(file.name);
+  for (const [name, text] of named) {
+    const kind = detectTrackKind(name);
     const { points, warning } = parseTrackCSV(text, kind);
     // Keyed by file name: loading a new file name ADDS a new toggleable
     // entry alongside whatever's already loaded (e.g. MT then Dredge later
     // still shows both); re-loading the same file name replaces just that
     // one entry rather than duplicating it.
-    state.trackLayers.set(file.name, { fileName: file.name, kind, points, visible: true });
-    perFileNotes.push(warning ? `${file.name}: ${warning}` : `${file.name}: ${points.length} point(s) (${kind}).`);
+    state.trackLayers.set(name, { fileName: name, kind, points, visible: true });
+    perFileNotes.push(warning ? `${name}: ${warning}` : `${name}: ${points.length} point(s) (${kind}).`);
   }
-  e.target.value = ""; // allow re-selecting the same file name later to reload it
   buildTrackLayerRows();
   buildTrackLegend();
   rebuildVisibleTrackPoints();
   if (statusEl) statusEl.textContent = perFileNotes.join(" ");
   placeTrackPoints();
+}
+
+// The planned AT53-04 site files (MT_dredging_coords/), served by run_viewer.py at /sites/.
+document.getElementById("loadPlanSitesBtn").addEventListener("click", async () => {
+  const statusEl = document.getElementById("trackStatus");
+  try {
+    const named = [];
+    for (const name of ["DredgeSites.csv", "MTsites.csv"]) {
+      const r = await fetch(`sites/${name}`, { cache: "no-store" });
+      if (!r.ok) throw new Error(`${name}: HTTP ${r.status}`);
+      named.push([name, await r.text()]);
+    }
+    addTrackCsvs(named);
+  } catch (err) {
+    statusEl.textContent = `Could not load the site files (${err.message}). Start the viewer with run_viewer.py, or pick the CSVs by hand.`;
+  }
 });
 
 document.getElementById("clearTrackBtn").addEventListener("click", () => {
@@ -2850,10 +2877,51 @@ function setShipStatus(text) {
   document.getElementById("shipStatus").textContent = text;
 }
 
+// point `km` along great-circle bearing `deg` (clockwise from north) from (lat, lon)
+// Entity polylines are built asynchronously (web workers) and the viewer only redraws on
+// request (requestRenderMode), so a new line would stay invisible until the next camera
+// move. The async build itself only advances during a render, so keep requesting a render
+// every frame (the clock ticks every frame even when nothing is drawn) until every entity
+// is built, then one final render to draw it.
+let entityRenderPending = false;
+function renderSoon() {
+  entityRenderPending = true;
+  viewer.scene.requestRender();
+}
+viewer.clock.onTick.addEventListener(() => {
+  if (!entityRenderPending) return;
+  if (viewer.dataSourceDisplay.ready) entityRenderPending = false;
+  viewer.scene.requestRender();
+});
+
+function destinationDeg(lat, lon, deg, km) {
+  const R = 6371.0088, d = km / R, b = Cesium.Math.toRadians(deg);
+  const p1 = Cesium.Math.toRadians(lat), l1 = Cesium.Math.toRadians(lon);
+  const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+  return [Cesium.Math.toDegrees(p2), Cesium.Math.toDegrees(l2)];
+}
+
+function setShipVector(key, deg, p, km, material) {
+  if (deg == null) {
+    if (ship[key]) viewer.entities.remove(ship[key]);
+    ship[key] = null;
+    return;
+  }
+  const [la, lo] = destinationDeg(p.lat, p.lon, deg, km);
+  const positions = [Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0), Cesium.Cartesian3.fromDegrees(lo, la, 0)];
+  if (!ship[key]) {
+    ship[key] = viewer.entities.add({ polyline: { positions, width: 3, material, depthFailMaterial: material } });
+  } else {
+    ship[key].polyline.positions = positions;
+  }
+}
+
 function clearShip() {
   if (ship.entity) viewer.entities.remove(ship.entity);
   if (ship.trackEntity) viewer.entities.remove(ship.trackEntity);
-  ship.entity = ship.trackEntity = null;
+  for (const k of ["hdgEntity", "cogEntity"]) if (ship[k]) viewer.entities.remove(ship[k]);
+  ship.entity = ship.trackEntity = ship.hdgEntity = ship.cogEntity = null;
   viewer.scene.requestRender();
 }
 
@@ -2916,7 +2984,13 @@ async function pollShip() {
   const dirDeg = h ? h.deg : m ? m.cog : null;
   ship.entity.billboard.rotation = dirDeg != null ? -Cesium.Math.toRadians(dirDeg) : 0;
   ship.entity.label.text = label;
-  const pts = (s.track || []).map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, 0));
+  // Direction vectors, 30 min ahead at the current speed (min 2 km): heading solid, COG dashed.
+  // Both shown when both exist, so crab/drift angle is visible.
+  const aheadKm = Math.max(2, (m && m.sog_kn != null ? m.sog_kn : 0) * 1.852 * 0.5);
+  setShipVector("hdgEntity", h ? h.deg : null, p, aheadKm, new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString("#ff2d6f")));
+  setShipVector("cogEntity", m ? m.cog : null, p, aheadKm,
+    new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.WHITE, dashLength: 12 }));
+  const pts =(s.track || []).map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, 0));
   if (pts.length >= 2) {
     if (!ship.trackEntity) {
       ship.trackEntity = viewer.entities.add({
@@ -2927,10 +3001,11 @@ async function pollShip() {
       ship.trackEntity.polyline.positions = pts;
     }
   }
-  viewer.scene.requestRender();
+  renderSoon();
   setShipStatus(`Fix from ${p.sentence}${p.utc ? " at " + p.utc + " UTC" : ""}, ${Math.round(p.age_s)} s old` +
     (h ? `; heading from ${h.sentence}` : m ? `; no heading feed, arrow = course over ground (${m.sentence})` : "; no heading received") +
-    `. Track: ${(s.track || []).length} pts (1/min). Next update in 1 min.`);
+    `. Lines show 30 min ahead (${aheadKm.toFixed(1)} km): solid pink = heading, dashed white = course over ground.` +
+    ` Track: ${(s.track || []).length} pts (1/min). Next update in 1 min.`);
 }
 
 document.getElementById("shipToggle").addEventListener("change", (e) => {
@@ -2951,6 +3026,290 @@ document.getElementById("shipFlyBtn").addEventListener("click", () => {
   const c = Cesium.Cartographic.fromCartesian(ship.entity.position.getValue(Cesium.JulianDate.now()));
   viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, 60000), duration: 1.0 });
 });
+
+// =====================================================================
+// Previous dredges (Site_Maps/Previous_Dredges_Compiled.csv, served at sites/)
+// =====================================================================
+// Same symbols as Site_Maps/make_previous_dredge_maps.py: shape = cruise; "recovery"
+// colouring = green glass / light grey no glass / black X no rock (Dredge_Glass_Status_Map),
+// "cruise" colouring = cruise colour, filled = glass, open = no glass, X = no rock
+// (Permit_Dredges_with_Previous_Map). MV1007 on- to off-bottom tracks drawn as lines.
+const PREV_CRUISES = {
+  MV1007: { shape: "o", color: "#ff7f00", label: "MV1007 (2010)" },
+  PLUME02: { shape: "D", color: "#f768a1", label: "PLUME02" },
+  SO158: { shape: "P", color: "#00d5ff", label: "SO158" },
+  TR164: { shape: "s", color: "#9be564", label: "TR164" },
+  CTW: { shape: "<", color: "#ffd92f", label: "CTW" },
+  DS: { shape: "p", color: "#e5c494", label: "DS" },
+  ST7: { shape: ">", color: "#b3b3b3", label: "ST7" },
+  NA06x: { shape: "h", color: "#fdbf6f", label: "NA062/NA063" },
+  NZ: { shape: "v", color: "#cab2d6", label: "NZ" },
+};
+const PREV_GLASS_C = { glass: "#1a9850", "no glass": "#d9d9d9", "no rock": "#000000" };
+const PREV_CLASSES = ["glass", "no glass", "no rock"];
+const prev = {
+  rows: null, colorBy: "glass", labels: false, tracks: true,
+  cruiseOn: {}, classOn: { glass: true, "no glass": true, "no rock": true },
+  billboards: null, labelCollection: null, trackEntities: [], iconCache: new Map(),
+};
+
+// quote-aware CSV (descriptions contain commas)
+function parseCsvRows(text) {
+  const rows = [];
+  let row = [], cell = "", q = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (q) {
+      if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (ch === '"') q = false;
+      else cell += ch;
+    } else if (ch === '"') q = true;
+    else if (ch === ",") { row.push(cell); cell = ""; }
+    else if (ch === "\n" || ch === "\r") {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      row.push(cell); cell = "";
+      if (row.some((c) => c !== "")) rows.push(row);
+      row = [];
+    } else cell += ch;
+  }
+  row.push(cell);
+  if (row.some((c) => c !== "")) rows.push(row);
+  const head = rows.shift();
+  return rows.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i] ?? ""])));
+}
+
+function prevShapePath(g, shape, r) {
+  const poly = (n, rot) => {
+    for (let k = 0; k < n; k++) {
+      const a = rot + (2 * Math.PI * k) / n;
+      k ? g.lineTo(r * Math.sin(a), -r * Math.cos(a)) : g.moveTo(r * Math.sin(a), -r * Math.cos(a));
+    }
+    g.closePath();
+  };
+  g.beginPath();
+  if (shape === "o") g.arc(0, 0, r, 0, 2 * Math.PI);
+  else if (shape === "s") g.rect(-r * 0.85, -r * 0.85, 1.7 * r, 1.7 * r);
+  else if (shape === "D") poly(4, 0);
+  else if (shape === "v") poly(3, Math.PI);
+  else if (shape === "<") poly(3, -Math.PI / 2);
+  else if (shape === ">") poly(3, Math.PI / 2);
+  else if (shape === "p") poly(5, 0);
+  else if (shape === "h") poly(6, 0);
+  else if (shape === "P") { // filled plus
+    const a = r * 0.38;
+    g.moveTo(-a, -r); g.lineTo(a, -r); g.lineTo(a, -a); g.lineTo(r, -a); g.lineTo(r, a); g.lineTo(a, a);
+    g.lineTo(a, r); g.lineTo(-a, r); g.lineTo(-a, a); g.lineTo(-r, a); g.lineTo(-r, -a); g.lineTo(-a, -a);
+    g.closePath();
+  }
+}
+
+// One canvas per (cruise shape, recovery class, colour mode).
+function prevIcon(cruise, cls, colorBy) {
+  const c = PREV_CRUISES[cruise] || { shape: "o", color: "#ffffff" };
+  const key = `${c.shape}|${c.color}|${cls}|${colorBy}`;
+  if (prev.iconCache.has(key)) return prev.iconCache.get(key);
+  const S = 24, cv = document.createElement("canvas");
+  cv.width = cv.height = S;
+  const g = cv.getContext("2d");
+  g.translate(S / 2, S / 2);
+  g.lineJoin = "round";
+  if (cls === "no rock") { // X, black with white edge (recovery) or cruise colour (cruise)
+    const r = 7;
+    g.lineCap = "round";
+    for (const [w, col] of [[6, colorBy === "glass" ? "#ffffff" : "#0b0b0b"], [3, colorBy === "glass" ? "#000000" : c.color]]) {
+      g.lineWidth = w;
+      g.strokeStyle = col;
+      g.beginPath(); g.moveTo(-r, -r); g.lineTo(r, r); g.moveTo(r, -r); g.lineTo(-r, r); g.stroke();
+    }
+  } else {
+    prevShapePath(g, c.shape, 10.5); // dark halo: tells previous dredges apart from the white-haloed planned sites
+    g.fillStyle = "#151515";
+    g.fill();
+    prevShapePath(g, c.shape, 7.5);
+    if (colorBy === "glass" || cls === "glass") {
+      g.fillStyle = colorBy === "glass" ? PREV_GLASS_C[cls] : c.color;
+      g.fill();
+    } else { // open symbol in the cruise colour
+      g.fillStyle = "#ffffff";
+      g.fill();
+      g.lineWidth = 3;
+      g.strokeStyle = c.color;
+      g.stroke();
+    }
+  }
+  prev.iconCache.set(key, cv);
+  return cv;
+}
+
+function setPrevStatus(text) {
+  document.getElementById("prevStatus").textContent = text;
+}
+
+async function loadPrevDredges() {
+  const r = await fetch("sites/Previous_Dredges_Compiled.csv", { cache: "no-store" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  prev.rows = parseCsvRows(await r.text()).map((d) => ({
+    ...d,
+    prevDredge: true,
+    lat: parseFloat(d.lat), lon: parseFloat(d.lon), depth: parseFloat(d.depth),
+    off_lat: parseFloat(d.off_lat), off_lon: parseFloat(d.off_lon),
+  })).filter((d) => Number.isFinite(d.lat) && Number.isFinite(d.lon));
+  for (const d of prev.rows) if (!(d.cruise in prev.cruiseOn)) prev.cruiseOn[d.cruise] = true;
+  buildPrevFilters();
+}
+
+function buildPrevFilters() {
+  const el = document.getElementById("prevFilters");
+  el.innerHTML = "";
+  const addRow = (icon, text, checked, onChange) => {
+    const row = document.createElement("label");
+    row.className = "track-legend-row prev-row";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = checked;
+    cb.addEventListener("change", (e) => onChange(e.target.checked));
+    const img = document.createElement("img");
+    img.src = icon.toDataURL();
+    img.className = "prev-swatch";
+    const span = document.createElement("span");
+    span.textContent = text;
+    row.append(cb, img, span);
+    el.appendChild(row);
+  };
+  const count = (f) => prev.rows.filter(f).length;
+  const head = (t) => { const h = document.createElement("div"); h.className = "prev-head"; h.textContent = t; el.appendChild(h); };
+  head("Recovery");
+  for (const cls of PREV_CLASSES) {
+    addRow(prevIcon("MV1007", cls, prev.colorBy), `${cls} (${count((d) => d.glass === cls)})`, prev.classOn[cls],
+      (on) => { prev.classOn[cls] = on; placePrevDredges(); });
+  }
+  head("Cruise (shape)");
+  for (const cruise of Object.keys(prev.cruiseOn)) {
+    const n = count((d) => d.cruise === cruise);
+    const ng = count((d) => d.cruise === cruise && d.glass === "glass");
+    addRow(prevIcon(cruise, "glass", prev.colorBy), `${PREV_CRUISES[cruise]?.label || cruise}: ${n} (${ng} glass)`,
+      prev.cruiseOn[cruise], (on) => { prev.cruiseOn[cruise] = on; placePrevDredges(); });
+  }
+}
+
+// Stations are drawn at their logged on-bottom depth x the vertical exaggeration (same
+// scaling as the meshes), not by sampleHeight(): that is one offscreen render per point
+// (~0.1 s each on an integrated GPU, 10+ s for all 104). On the ~1 km GMRT basemap the
+// rendered surface is a median 56 m off the logged depths (-504 to +232 m, n=24; the coarse
+// grid smooths steep edifices), less on the detailed surveys. The markers ignore depth
+// testing, so they stay visible either way.
+// Only a station with no logged depth falls back to sampling the visible surface.
+function prevSurfaceCartesian(lat, lon, depth) {
+  const carto = Cesium.Cartographic.fromDegrees(lon, lat, 0);
+  if (Number.isFinite(depth)) {
+    carto.height = -depth * state.exaggeration;
+    return { cartesian: Cesium.Cartographic.toCartesian(carto), onSurface: true };
+  }
+  let h;
+  try { h = viewer.scene.sampleHeight(carto); } catch (e) { h = undefined; }
+  const onSurface = h !== undefined && Number.isFinite(h);
+  carto.height = onSurface ? h : 0;
+  return { cartesian: Cesium.Cartographic.toCartesian(carto), onSurface };
+}
+
+function clearPrevDredges() {
+  if (prev.billboards) prev.billboards.removeAll();
+  if (prev.labelCollection) prev.labelCollection.removeAll();
+  for (const e of prev.trackEntities) viewer.entities.remove(e);
+  prev.trackEntities = [];
+  viewer.scene.requestRender();
+}
+
+// resample=true when the surface changed (dataset toggled, exaggeration...). Each
+// sampleHeight() is an offscreen render, so heights are cached per station and filter /
+// colour / label clicks reuse them.
+function placePrevDredges(resample = false) {
+  if (resample && prev.rows) for (const d of prev.rows) d.carto = null;
+  clearPrevDredges();
+  if (!document.getElementById("prevToggle").checked || !prev.rows) return;
+  if (!prev.billboards) prev.billboards = viewer.scene.primitives.add(new Cesium.BillboardCollection());
+  if (!prev.labelCollection) prev.labelCollection = viewer.scene.primitives.add(new Cesium.LabelCollection());
+  const shown = prev.rows.filter((d) => prev.cruiseOn[d.cruise] && prev.classOn[d.glass]);
+  let off = 0;
+  for (const d of shown) {
+    if (!d.carto) {
+      const s = prevSurfaceCartesian(d.lat, d.lon, d.depth);
+      d.carto = s;
+      d.onSurface = s.onSurface;
+      // off-bottom end drawn at the on-bottom height (tracks are <~2 km; saves a sample)
+      if (Number.isFinite(d.off_lat) && Number.isFinite(d.off_lon)) {
+        const h = Cesium.Cartographic.fromCartesian(s.cartesian).height;
+        d.carto.offCartesian = Cesium.Cartesian3.fromDegrees(d.off_lon, d.off_lat, h);
+      }
+    }
+    const cartesian = d.carto.cartesian;
+    if (!d.onSurface) off += 1;
+    prev.billboards.add({
+      position: cartesian, image: prevIcon(d.cruise, d.glass, prev.colorBy), width: 18, height: 18, id: d,
+      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+    });
+    if (prev.labels) {
+      prev.labelCollection.add({
+        position: cartesian,
+        text: `${d.cruise === "MV1007" ? "MV " : ""}${d.station}${Number.isFinite(d.depth) ? ` ${Math.round(d.depth)} m` : ""}`,
+        font: "12px sans-serif", fillColor: Cesium.Color.WHITE, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(11, -9),
+        horizontalOrigin: Cesium.HorizontalOrigin.LEFT, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 250000), // hide when zoomed far out
+      });
+    }
+    if (prev.tracks && d.carto.offCartesian) {
+      prev.trackEntities.push(viewer.entities.add({
+        polyline: {
+          positions: [cartesian, d.carto.offCartesian], width: 3,
+          material: Cesium.Color.fromCssColorString("#111111"),
+          depthFailMaterial: Cesium.Color.fromCssColorString("#111111").withAlpha(0.6),
+        },
+      }));
+    }
+  }
+  renderSoon();
+  setPrevStatus(`${shown.length} of ${prev.rows.length} stations shown` +
+    (off ? `; ${off} have no logged depth and no surface under them (drawn at sea level)` : "") +
+    ". Hover or click a symbol for details.");
+}
+
+function prevTooltipText(d) {
+  const lines = [`${d.cruise} ${d.station}: ${d.glass.toUpperCase()}`,
+    `${fmtDegMin(d.lat, "N", "S")}  ${fmtDegMin(d.lon, "E", "W")}` +
+    (Number.isFinite(d.depth) ? `   ${Math.round(d.depth)} m` : "")];
+  if (d.location) lines.push(d.location);
+  if (d.recovery) lines.push(`Recovery: ${d.recovery}`);
+  if (d.description) lines.push(d.description);
+  if (d.samples && d.samples !== d.station) lines.push(`Samples: ${d.samples}`);
+  if (d.note) lines.push(`Note: ${d.note}`);
+  if (d.source) lines.push(`Source: ${d.source}`);
+  if (d.onSurface === false) lines.push("(no logged depth and no surface here: drawn at sea level)");
+  return lines.join("\n");
+}
+
+document.getElementById("prevToggle").addEventListener("change", async (e) => {
+  if (!e.target.checked) { clearPrevDredges(); setPrevStatus(""); return; }
+  if (!prev.rows) {
+    setPrevStatus("Loading previous dredges...");
+    try {
+      await loadPrevDredges();
+    } catch (err) {
+      setPrevStatus(`Could not load sites/Previous_Dredges_Compiled.csv (${err.message}). Start the viewer with run_viewer.py.`);
+      e.target.checked = false;
+      return;
+    }
+  }
+  placePrevDredges();
+});
+for (const el of document.querySelectorAll('input[name="prevColor"]')) {
+  el.addEventListener("change", (e) => {
+    prev.colorBy = e.target.value;
+    if (prev.rows) { buildPrevFilters(); placePrevDredges(); }
+  });
+}
+document.getElementById("prevLabels").addEventListener("change", (e) => { prev.labels = e.target.checked; placePrevDredges(); });
+document.getElementById("prevTracks").addEventListener("change", (e) => { prev.tracks = e.target.checked; placePrevDredges(); });
 
 // ---- dataset manifest ----
 async function init() {

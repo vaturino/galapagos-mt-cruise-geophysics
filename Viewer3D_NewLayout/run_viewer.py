@@ -24,6 +24,9 @@ from HDT, THS or HDG (HDG is magnetic and is flagged as such). Plain "lat lon" /
 numbers are accepted as a fallback. The latest fix is served at /ship.json; the viewer polls
 it once a minute. Only one program can normally listen on a UDP port, so stop any
 `nc -ul` on those ports first (or have the ship's system broadcast the feed).
+
+Site lists elsewhere in the repo (previous dredges, AT53-04 dredge and MT sites) are
+served at /sites/<file name> so the viewer can load them with one click (SITE_FILES).
 """
 import argparse
 import functools
@@ -216,6 +219,15 @@ def _listen(port, kind, ship):
                     ship.heading = {"deg": deg, "true": true_hdg, "sentence": sent, "received": now}
 
 
+# Site lists that live elsewhere in the repo, served at /sites/<name> (whitelist only).
+REPO = Path(__file__).resolve().parent.parent
+SITE_FILES = {
+    "Previous_Dredges_Compiled.csv": "Site_Maps/Previous_Dredges_Compiled.csv",
+    "DredgeSites.csv": "MT_dredging_coords/DredgeSites.csv",
+    "MTsites.csv": "MT_dredging_coords/MTsites.csv",
+}
+
+
 class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
     """Never let the browser reuse a cached meta.json / mesh.bin. Without this, a rebuilt or
     restored layer can be read with a stale cached meta.json (wrong vertex count / section
@@ -231,7 +243,16 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
     ship_enabled = False
 
     def do_GET(self):
-        if self.path.split("?")[0] == "/ship.json":
+        name = self.path.split("?")[0]
+        if name.startswith("/sites/") and name[7:] in SITE_FILES:
+            body = (REPO / SITE_FILES[name[7:]]).read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/csv; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if name == "/ship.json":
             snap = self.ship.snapshot(self.ship_enabled) if self.ship else {"enabled": False}
             body = json.dumps(snap).encode()
             self.send_response(200)
@@ -243,7 +264,7 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 
     def log_message(self, fmt, *args):
-        if "/ship.json" not in (args[0] if args else ""):  # don't log the once-a-minute poll
+        if "/ship.json" not in (str(args[0]) if args else ""):  # args[0] is an HTTPStatus for errors  # don't log the once-a-minute poll
             super().log_message(fmt, *args)
 
     def send_head(self):

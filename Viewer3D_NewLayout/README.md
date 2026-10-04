@@ -149,3 +149,59 @@ done
 
 Keep any single layer's `mesh.bin` well under 2 GB. In practice, aim for about
 15 M vertices (about 1 GB) or less.
+
+### Previous dredges, planned sites and ship direction (2026-10-04)
+
+**Previous dredges.** Tick "Previous dredges (earlier cruises)". These are the
+104 stations from 9 cruises in `Site_Maps/Previous_Dredges_Compiled.csv`, drawn
+with the same symbols as the previous-dredge maps in `Site_Maps/`:
+- **Shape = cruise:**
+  - MV1007 circle
+  - TR164 square
+  - SO158 plus
+  - PLUME02 diamond
+  - CTW and ST7 triangles
+  - DS pentagon
+  - NA062/063 hexagon
+  - NZ down-triangle
+- **Colour by recovery:** green = glass, grey = no glass, X = no rock.
+- **Colour by cruise:** filled = glass, open = no glass, X = no rock.
+- **Filters:** untick any recovery class or cruise to hide it. The row counts
+  match the CSV (65 glass, 36 no glass, 3 no rock).
+- **Extras:**
+  - MV1007 on- to off-bottom dredge tracks (black lines)
+  - optional labels (station and depth), hidden beyond about 250 km camera distance
+  - hover or click for cruise, station, position, depth, location,
+    recovery, description and any correction note
+- **Dark halo:** previous dredges have a dark halo; planned sites have a white
+  halo.
+- **Depth placement:** markers sit at the logged on-bottom depth times the
+  vertical exaggeration, not at the sampled surface. Sampling costs about
+  0.1 s per point on an integrated GPU.
+  - On the ~1 km GMRT basemap the rendered surface is a median 56 m off the
+    logged depths (range −504 to +232 m, n=24), because the coarse grid smooths
+    steep edifices.
+  - Markers are never hidden by the surface.
+
+**AT53-04 planned sites in one click.** "Load AT53-04 dredge + MT sites" loads
+`MT_dredging_coords/DredgeSites.csv` and `MTsites.csv` without the file picker.
+Planned-site markers are now drawn on top of the seafloor instead of being
+half-hidden by it.
+
+`run_viewer.py` serves these three CSVs at `/sites/<file name>`. Only the files
+in its `SITE_FILES` list are served, so open the viewer through
+`run_viewer.py`.
+
+**Ship direction lines.** The ship marker now has lines showing 30 min ahead
+at the current speed over ground (minimum 2 km):
+- solid pink = true heading, when the heading feed (UDP 55001) is present
+- dashed white = course over ground
+
+With both shown, the angle between them is the crab/drift angle. The pink line
+behind the ship is its track, one point per minute.
+
+**Fixes.**
+- New lines (ship track, direction lines, dredge tracks) now draw as soon as
+  they're built. Before, they only appeared after the next camera move.
+- `run_viewer.py` no longer drops the connection on a 404. The log filter
+  assumed a string and crashed on the error code.

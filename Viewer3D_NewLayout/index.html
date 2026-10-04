@@ -87,11 +87,27 @@
       <label>Track points (CSV upload)</label>
       <input type="file" id="trackCsvInput" accept=".csv,text/csv" multiple>
       <div class="track-buttons">
+        <button id="loadPlanSitesBtn">Load AT53-04 dredge + MT sites</button>
         <button id="clearTrackBtn">Clear points</button>
       </div>
       <div id="trackLayerList" class="ds-section-list"></div>
       <div id="trackStatus" class="hint-text">Select one or more CSVs at once (e.g. MTsites.csv + DredgeSites.csv from MT_dredging_coords/) -- lat/lon columns required, status column optional. Each file becomes its own row above with a checkbox, like the dataset layers -- loading a new file adds it alongside what's already there; loading the same file name again replaces just that one. Marker shape comes from the file name ("dredge"/"mt"); colour comes from status. Points snap onto the currently-visible seafloor surface.</div>
       <div id="trackLegend" class="track-legend"></div>
+    </div>
+
+    <div class="control-group">
+      <label><input type="checkbox" id="prevToggle"> Previous dredges (earlier cruises)</label>
+      <div class="radio-row">
+        <label><input type="radio" name="prevColor" value="glass" checked> Colour by recovery</label>
+        <label><input type="radio" name="prevColor" value="cruise"> Colour by cruise</label>
+      </div>
+      <div class="radio-row">
+        <label><input type="checkbox" id="prevTracks" checked> MV1007 dredge tracks</label>
+        <label><input type="checkbox" id="prevLabels"> Labels</label>
+      </div>
+      <div id="prevFilters" class="track-legend"></div>
+      <div id="prevStatus" class="hint-text"></div>
+      <div class="hint-text">104 stations from Site_Maps/Previous_Dredges_Compiled.csv (same symbols as the previous-dredge maps). Shape = cruise. By recovery: green = glass, grey = no glass, X = no rock. By cruise: filled = glass, open = no glass. Untick a row to hide it.</div>
     </div>
 
     <div class="control-group">

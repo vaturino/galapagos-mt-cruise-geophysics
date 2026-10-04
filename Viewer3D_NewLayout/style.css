@@ -574,3 +574,9 @@ input[type="range"] {
 .legend-palette-rev { font-size: 11px; white-space: nowrap; color: #b9c6d3; }
 .legend-palette-note { font-size: 10.5px; color: #b9c6d3; margin-top: 2px; display: flex; align-items: center; gap: 5px; }
 .legend-land-swatch { display: inline-block; width: 14px; height: 9px; background: rgb(184,173,140); border: 1px solid #555; }
+
+/* previous-dredge layer */
+.track-tooltip { white-space: pre-line; max-width: 340px; }
+.prev-head { font-size: 11px; color: #9fb0c0; margin-top: 6px; }
+.prev-row { cursor: pointer; }
+.prev-swatch { width: 16px; height: 16px; }
