@@ -95,6 +95,13 @@
     </div>
 
     <div class="control-group">
+      <label><input type="checkbox" id="shipToggle"> Show ship position (live GPS + heading)</label>
+      <div class="track-buttons"><button id="shipFlyBtn">Go to ship</button></div>
+      <div id="shipStatus" class="hint-text"></div>
+      <div class="hint-text">Optional. Needs the viewer started with <code>python3 run_viewer.py --ship-feed</code> (listens on UDP 55000 for GPS and 55001 for heading, NMEA). Updates once a minute while ticked.</div>
+    </div>
+
+    <div class="control-group">
       <label>Export</label>
       <div class="radio-row">
         <label><input type="radio" name="exportFormat" value="color" checked> Colour (picture)</label>

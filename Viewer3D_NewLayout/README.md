@@ -75,3 +75,77 @@ reference/fallback, not because anything still depends on its own
 `app.js`/`index.html`/`style.css` -- those are no longer maintained.
 Someone who clones this repository fresh from GitHub will only see this
 folder, not `Viewer3D/`.
+
+## Additions on the `TM_version` branch (2026-10-04)
+
+**Opens in Chrome.** `run_viewer.py` opens the viewer in Google Chrome (a normal
+install, or the Flatpak `com.google.Chrome`), and falls back to the default
+browser only if Chrome isn't found.
+
+**No stale layers.** The server sends `Cache-Control: no-store` and never answers
+"304 Not Modified". Otherwise, after a layer is rebuilt or restored, the browser
+can keep using an old `meta.json` with the new `mesh.bin`. That was seen here: a
+44.5 M-vertex meta read against an 11.1 M-vertex mesh, giving
+`RangeError: Invalid typed array length`, and the layer silently didn't draw. If
+a layer still fails to load, the viewer now shows the error in the loading
+message and unticks the layer.
+
+**Colour maps per layer.** Each legend row has a colour-map menu and a
+**reverse** box:
+- "as built" keeps the layer's original colours.
+- The others are Deep, Haline, Ice and Dense (cmocean); Oslo and Batlow
+  (Crameri); Viridis; Cividis; Turbo; Spectral; Greyscale. They were sampled from
+  the real colour maps (17 stops each).
+- For bathymetry, the chosen palette spans the water only (deepest point to sea
+  level). Land is drawn in one flat tan, shown with a swatch in the legend.
+- The drag handles, cross-section profiles and the colour GeoTIFF export all
+  follow the chosen palette.
+
+**Ship position (optional).** Start with `python3 run_viewer.py --ship-feed`, then
+tick "Show ship position" in the panel.
+- **Listening:** the server listens for NMEA on UDP **55000** (GPS) and
+  **55001** (heading), the ports `nc -ul 55000` / `nc -ul 55001` read. They can
+  be changed with `--gps-port` / `--heading-port`.
+- **Sentences used:** position from GGA, RMC and GLL; course and speed over
+  ground from RMC and VTG; heading from HDT, THS and HDG (HDG is magnetic and is
+  labelled "M"). Checksums are checked when present.
+- **Display:** the page polls `/ship.json` once a minute. It draws a ship arrow,
+  a label (position in degrees and decimal minutes, heading or course, speed,
+  fix age) and a 1-point-per-minute track. "Go to ship" flies the camera there.
+- **No heading feed:** the arrow follows course over ground and the label says
+  "COG … (no heading feed)".
+- **Stale fix:** a fix older than 5 min turns the arrow grey and is labelled
+  STALE.
+- **Diagnostics:** `/ship.json` lists the sentence types received on each port.
+  On 2026-10-04 the GPS port carried `$GPGGA`, `$GPRMC`, `$GPVTG` and `$GPZDA`,
+  and nothing arrived on 55001.
+- **Ports in use:** only one program can normally listen on a UDP port. Close
+  any `nc -ul` on those ports first.
+
+**Mittelstaedt bathymetry at native 50 m, as 4 tiles.** A single native 50 m
+mesh of the whole platform is 2.85 GB (44.5 M vertices). Chrome can't hold more
+than about 2 GB in one array (2.0 GB allocates, 2.2 GB fails), so that file can
+never load. The platform is instead split 2 × 2, with a one-cell overlap so
+there are no gaps:
+- layers `Mittelstaedt_50m_NW`, `_NE`, `_SW`, `_SE`
+- each about 0.67 GB and 11.1 M vertices, `--colormap relief`
+- each with its own colour scale and legend row
+- all four load together
+
+The old ~100 m `Mittelstaedt_Galapagos_Bathy` layer is still there. To rebuild:
+
+```bash
+# 1. crop (repo venv): writes FOR_TUSHAR/tiles_50m/CUT_bath_clean_{NW,NE,SW,SE}.tif
+#    from FOR_TUSHAR/CUT_bath_clean.tif (2x2 split at the grid's middle row/column, +1 cell overlap)
+# 2. build each tile
+cd scripts
+for t in NW NE SW SE; do
+  venv/bin/python3 build_cesium_mesh.py --bathy ../FOR_TUSHAR/tiles_50m/CUT_bath_clean_$t.tif \
+    --out-dir ../Viewer3D/data/Mittelstaedt_50m_$t --stride 1 --colormap relief \
+    --label "Mittelstaedt/Young bathymetry, 50 m native - $t tile"
+done
+# 3. add the four ids to Viewer3D/data/manifest.json (category "bathymetry")
+```
+
+Keep any single layer's `mesh.bin` well under 2 GB. In practice, aim for about
+15 M vertices (about 1 GB) or less.

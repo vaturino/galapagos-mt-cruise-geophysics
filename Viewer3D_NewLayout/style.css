@@ -567,3 +567,10 @@ input[type="range"] {
 #loading.hidden {
   display: none;
 }
+
+/* per-layer colour-map menu in the legend */
+.legend-palette-row { display: flex; gap: 8px; align-items: center; margin: 3px 0 4px; }
+.legend-palette { flex: 1; min-width: 0; font-size: 11px; background: #1b2633; color: #dfe7ef; border: 1px solid #3a4a5c; border-radius: 3px; padding: 2px 4px; }
+.legend-palette-rev { font-size: 11px; white-space: nowrap; color: #b9c6d3; }
+.legend-palette-note { font-size: 10.5px; color: #b9c6d3; margin-top: 2px; display: flex; align-items: center; gap: 5px; }
+.legend-land-swatch { display: inline-block; width: 14px; height: 9px; background: rgb(184,173,140); border: 1px solid #555; }
