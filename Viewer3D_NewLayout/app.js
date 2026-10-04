@@ -395,7 +395,17 @@ async function setDatasetVisible(id, visible) {
     cb.checked = visible;
   });
   if (visible && !d.loaded) {
-    await loadDataset(id); // loadDataset() clears the loading overlay itself
+    try {
+      await loadDataset(id); // loadDataset() clears the loading overlay itself
+    } catch (err) {
+      // e.g. mesh.bin larger than the browser's ~2 GB ArrayBuffer limit, or meta.json not
+      // matching mesh.bin -- say so instead of silently drawing nothing
+      console.error(`Failed to load ${id}:`, err);
+      d.visible = false;
+      document.querySelectorAll(`input[data-id="${id}"]`).forEach((cb) => (cb.checked = false));
+      setLoading(true, `Could not load ${d.manifestEntry.label}: ${err.message}`);
+      return;
+    }
   } else {
     if (d.primitive) d.primitive.show = visible;
     setLoading(false);
