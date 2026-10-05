@@ -51,7 +51,15 @@ def read_old_style_grd(path):
     node_offset = int(zvar._attributes.get("node_offset", 0))
     z = np.array(zvar[:], dtype=np.float32).reshape(ny, nx)
     fill = zvar._attributes.get("_FillValue")
+    scale = float(zvar._attributes.get("scale_factor", 1.0))
+    offset = float(zvar._attributes.get("add_offset", 0.0))
     nc.close()
+    if fill is not None:  # compare the stored (unscaled) values, then scale
+        z = np.where(z == np.float32(fill), np.nan, z)
+        fill = None
+    if scale != 1.0 or offset != 0.0:
+        z = z * np.float32(scale) + np.float32(offset)
+    z[~np.isfinite(z)] = np.nan  # +-Inf is used as no-data by some grids (AT50-09)
 
     if node_offset == 0:
         x = np.linspace(x_range[0], x_range[1], nx)

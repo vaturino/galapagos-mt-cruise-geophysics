@@ -63,10 +63,13 @@ DATASETS = {
                               kind="bathy", label="MV1007 (2010) multibeam bathymetry mosaic, 50 m", units="m"),
     "GSC_97-86W_100m": dict(paths=[B + "GSC_97-86W_Compilation/GSC_97-86W_100m_comp.grd"], epsg=4326,
                             kind="bathy", label="GSC 97-86 W compilation, 100 m", units="m"),
+    # the two DRFT04RR bathymetry grids store DEPTH (positive down): negated on load
     "DRFT04RR_bathymetry_100m": dict(paths=[B + "DRFT04RR_GSC_Bathymetry/galapagos.100m.comb_geomapapp.grd"],
-                                     epsg=4326, kind="bathy", label="DRFT04RR GSC bathymetry, 100 m", units="m"),
+                                     epsg=4326, kind="bathy", label="DRFT04RR GSC bathymetry, 100 m", units="m",
+                                     positive_down=True),
     "DRFT04RR_86W_bathymetry_10m": dict(paths=[B + "DRFT04RR_GSC_Bathymetry/86w_all_bathy_10m.grd"], epsg=4326,
-                                        kind="bathy", label="DRFT04RR 86 W bathymetry, 10 m", units="m"),
+                                        kind="bathy", label="DRFT04RR 86 W bathymetry, 10 m", units="m",
+                                        positive_down=True),
     "TN188_8m": dict(paths=[B + "TN188_GSC_Bathymetry_8m/TN188_DSL120A_8mbat.*_geomapapp.grd"], epsg=4326,
                      kind="bathy", label="TN188 DSL-120A bathymetry, ~7 m", units="m"),
     "Mittelstaedt_50m": dict(paths=[F + "CUT_bath_clean.tif"], epsg=4326, kind="bathy",
@@ -76,7 +79,8 @@ DATASETS = {
     # ---------------------------------------------------------------- backscatter / sidescan
     "MV1007_backscatter": dict(paths=["GeoMapApp_ready/MV1007_backscatter_mosaic.grd"], epsg=4326,
                                kind="backscatter", label="MV1007 backscatter mosaic", units="amplitude"),
-    "DRFT04RR_sidescan": dict(paths=[B + "DRFT04RR_GSC_Backscatter/*.grd", B + "DRFT04RR_GSC_Backscatter/*.asc"],
+    # (the 3 .asc files are duplicates of lines 17/18 with a half-cell registration error: not used)
+    "DRFT04RR_sidescan": dict(paths=[B + "DRFT04RR_GSC_Backscatter/*.grd"],
                               epsg=32615, kind="backscatter", label="DRFT04RR MR1 sidescan (8-16 m, UTM 15N)",
                               units="amplitude"),
     "MGL1106_sidescan_5m": dict(paths=[B + "MGL1106_CostaRica_CRISP/Sidescan_5m.grd"], epsg=4326,
@@ -178,7 +182,8 @@ def _regular(v, name, path):
         return v
     i = np.arange(v.size, dtype=np.float64)
     b, a = np.polyfit(i, v, 1)
-    if np.abs(v - (a + b * i)).max() > 0.5 * abs(b):
+    step_dev = np.abs(np.diff(v) - b).max()  # a missing row/column makes one step ~2x
+    if step_dev > 0.5 * abs(b) or np.abs(v - (a + b * i)).max() > 0.3 * abs(b):
         raise ValueError(f"{path}: {name} spacing is not uniform -- cannot georeference as a plain grid")
     return a + b * i
 
@@ -217,6 +222,7 @@ def load(path, epsg, bbox_xy=None, pad_cells=0):
             z = s.read(1, window=Window(ix.start, r0, ix.stop - ix.start, r1 - r0)).astype(np.float32)
             if s.nodata is not None and not np.isnan(s.nodata):
                 z[z == np.float32(s.nodata)] = np.nan
+            z[~np.isfinite(z)] = np.nan  # some grids use +-Inf as no-data
             return Grid(x[ix].copy(), y_top[r0:r1].copy(), z, src_epsg, path)
     # NetCDF: old-style GMT (x_range/...), ESRI ascii, or modern x/y/z | lon/lat/altitude
     if low.endswith(".asc"):
@@ -268,7 +274,23 @@ def load(path, epsg, bbox_xy=None, pad_cells=0):
         xa, ya, za = xa[ix], ya[iy], za[iy, ix]
     xa = _regular(xa, "x", path)
     ya = _regular(ya, "y", path)
-    return Grid(xa, ya[::-1].copy(), np.ascontiguousarray(za[::-1]), epsg, path)
+    za = np.ascontiguousarray(za[::-1])
+    za[~np.isfinite(za)] = np.nan  # the AT50-09 grids use +Inf as no-data
+    return Grid(xa, ya[::-1].copy(), za, epsg, path)
+
+
+def load_ds(ds_id, path, bbox_xy=None, pad_cells=0):
+    """load() plus the dataset's own conventions (sign) and a sign sanity check for bathymetry."""
+    spec = DATASETS[ds_id]
+    g = load(path, spec["epsg"], bbox_xy, pad_cells)
+    if spec.get("positive_down"):
+        g.z = -g.z
+    if spec["kind"] == "bathy" and g.z.size:
+        v = g.z[np.isfinite(g.z)]
+        if v.size > 1000 and np.mean(v > 0) > 0.9:
+            raise ValueError(f"{path}: {np.mean(v > 0):.0%} of 'bathymetry' values are above sea level: positive-down "
+                             "depth? set positive_down=True in DATASETS")
+    return g
 
 
 def lonlat_bbox_to_crs(bbox_ll, epsg):
@@ -289,19 +311,26 @@ def clip(ds_id, bbox_ll, pad_cells=1):
     first source file with finite data in the box (multi-file datasets: the finest such file),
     or None if no file covers it."""
     spec = DATASETS[ds_id]
-    best = None
+    bx = lonlat_bbox_to_crs(bbox_ll, spec["epsg"])
+    box_area = (bx[1] - bx[0]) * (bx[3] - bx[2])
+    cands = []
     for p in source_files(ds_id):
         try:
-            g = load(p, spec["epsg"], lonlat_bbox_to_crs(bbox_ll, spec["epsg"]), pad_cells)
-        except (ValueError, IndexError):
+            g = load_ds(ds_id, p, bx, pad_cells)
+        except (ValueError, IndexError, OSError):
             continue
         if min(g.z.shape) < 3 or not np.isfinite(g.z).any():  # box outside (or only touching) this grid
             continue
-        cov = float(np.isfinite(g.z).mean())
-        key = (cov > 0.5, -g.cell_size_m()[0], cov)
-        if best is None or key > best[0]:
-            best = (key, g)
-    return best[1] if best else None
+        # fraction of the REQUESTED box this file has data for (not of its own overlap)
+        cov = min(1.0, float(np.isfinite(g.z).sum()) * abs(g.dx * g.dy) / box_area) if box_area > 0 else 0.0
+        cands.append((cov, g.cell_size_m()[0], g))
+    if not cands:
+        return None
+    top = max(c[0] for c in cands)
+    # finest file that covers (nearly) as much of the box as the best-covering one
+    cov, _, g = min((c for c in cands if c[0] >= 0.9 * top), key=lambda c: c[1])
+    g.meta["box_coverage"] = round(cov, 3)
+    return g
 
 
 # ============================================================================ colour
@@ -362,7 +391,7 @@ def hillshade(g, azimuth=315.0, altitude=45.0, vexag=2.0, block=2048):
         gx = gx / dxm
         gy = -gy / np.float32(dym)  # rows run north->south
         slope = np.pi / 2 - np.arctan(np.hypot(gx, gy))
-        aspect = np.arctan2(-gx, gy)
+        aspect = np.arctan2(-gy, -gx)  # direction the slope faces, same convention as az
         hs = np.sin(alt) * np.sin(slope) + np.cos(alt) * np.cos(slope) * np.cos(az - aspect)
         out[r0:r1] = np.clip(hs, 0, 1)[r0 - a0:r0 - a0 + (r1 - r0)]
     return out
@@ -411,6 +440,7 @@ def slope_grid(g, baseline_m=None, block=2048):
         if zb.shape[0] > 2 * k:  # rows run north -> south: north minus south
             gy[k:-k, :] = (zb[:-2 * k, :] - zb[2 * k:, :]) / (2 * k * dym[k:-k])
         s = np.degrees(np.arctan(np.hypot(gx, gy)))
+        s[~np.isfinite(zb)] = np.nan  # no slope at a no-data cell, even inside a small hole
         out[r0:r1] = s[r0 - a0:r0 - a0 + (r1 - r0)]
     base = 2 * k * g.cell_size_m()[0]
     return Grid(g.x, g.y, out, g.epsg, g.source,
@@ -452,18 +482,43 @@ def _crs(epsg):
     return CRS.from_epsg(epsg)
 
 
-def write_elev_tif(g, path, overviews=True):
+NAV_NODATA = -9999.0
+
+
+def _world_files(g, path):
+    t = g.transform
+    with open(os.path.splitext(path)[0] + ".tfw", "w") as f:  # world file: pixel-centre origin
+        f.write(f"{t.a:.12f}\n{t.d:.12f}\n{t.b:.12f}\n{t.e:.12f}\n{t.c + t.a / 2:.12f}\n{t.f + t.e / 2:.12f}\n")
+    with open(os.path.splitext(path)[0] + ".prj", "w") as f:
+        f.write(_crs(g.epsg).to_wkt(version="WKT1_ESRI"))
+
+
+def write_elev_tif(g, path, overviews=True, nav=False):
+    """Float32 value GeoTIFF. Default: tiled DEFLATE, NaN no-data, overviews. nav=True: classic
+    strip TIFF, LZW without predictor, no-data -9999 (older readers mishandle NaN/predictor 3),
+    no overviews, plus .tfw/.prj."""
     import rasterio
     from rasterio.enums import Resampling
-    big = g.z.nbytes > 3.5e9
-    prof = dict(driver="GTiff", width=g.z.shape[1], height=g.z.shape[0], count=1, dtype="float32",
-                crs=_crs(g.epsg), transform=g.transform, nodata=np.nan, compress="deflate", predictor=3,
-                tiled=True, blockxsize=512, blockysize=512, BIGTIFF="YES" if big else "IF_SAFER")
+    if nav:
+        if g.z.nbytes > 3.9e9:
+            raise ValueError("clip too large for a classic (non-Big) TIFF; use a smaller box")
+        z = np.where(np.isfinite(g.z), g.z, NAV_NODATA).astype(np.float32)
+        prof = dict(driver="GTiff", width=g.z.shape[1], height=g.z.shape[0], count=1, dtype="float32",
+                    crs=_crs(g.epsg), transform=g.transform, nodata=NAV_NODATA, compress="lzw", tiled=False,
+                    BIGTIFF="NO")
+    else:
+        z = g.z
+        big = g.z.nbytes > 3.5e9
+        prof = dict(driver="GTiff", width=g.z.shape[1], height=g.z.shape[0], count=1, dtype="float32",
+                    crs=_crs(g.epsg), transform=g.transform, nodata=np.nan, compress="deflate", predictor=3,
+                    tiled=True, blockxsize=512, blockysize=512, BIGTIFF="YES" if big else "IF_SAFER")
     with rasterio.open(path, "w", **prof) as d:
-        d.write(g.z, 1)
+        d.write(z, 1)
         d.update_tags(SOURCE=os.path.relpath(g.source, REPO), NOTE="native grid values, no resampling")
-        if overviews and min(g.z.shape) > 1024:
+        if overviews and not nav and min(g.z.shape) > 1024:
             d.build_overviews([2, 4, 8, 16, 32], Resampling.average)
+    if nav:
+        _world_files(g, path)
     return path
 
 
@@ -492,11 +547,7 @@ def write_color_tif(g, rgb, valid, path, nav=False):
                 if min(h, w) > 1024:
                     d.build_overviews([2, 4, 8, 16, 32], Resampling.average)
     if nav:
-        t = g.transform
-        with open(os.path.splitext(path)[0] + ".tfw", "w") as f:  # world file: pixel-centre origin
-            f.write(f"{t.a:.12f}\n{t.d:.12f}\n{t.b:.12f}\n{t.e:.12f}\n{t.c + t.a / 2:.12f}\n{t.f + t.e / 2:.12f}\n")
-        with open(os.path.splitext(path)[0] + ".prj", "w") as f:
-            f.write(_crs(g.epsg).to_wkt(version="WKT1_ESRI"))
+        _world_files(g, path)
     return path
 
 
@@ -646,14 +697,14 @@ def render_grid(g, kind, name, out_dir, title, units, png=True, nav=False, wgs84
     out_dir.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
     rgb, valid, vr = colorize(g, kind, cmap=cmap)
-    files = [write_elev_tif(g, out_dir / f"{name}_{value_tag}_native.tif", overviews=not nav),
+    files = [write_elev_tif(g, out_dir / f"{name}_{value_tag}_native.tif", overviews=not nav, nav=nav),
              write_color_tif(g, rgb, valid, out_dir / f"{name}_color_native.tif", nav=nav)]
     if png:
         files.append(map_png(g, rgb, vr, kind, title, units, out_dir / f"{name}_map.png", sites=sites, cmap=cmap))
     if wgs84 and not g.geographic:
         gw = to_wgs84(g, kind)
         rgbw, vw, _ = colorize(gw, kind, vrange=vr, cmap=cmap)
-        files.append(write_elev_tif(gw, out_dir / f"{name}_{value_tag}_wgs84.tif", overviews=not nav))
+        files.append(write_elev_tif(gw, out_dir / f"{name}_{value_tag}_wgs84.tif", overviews=not nav, nav=nav))
         files.append(write_color_tif(gw, rgbw, vw, out_dir / f"{name}_color_wgs84.tif", nav=nav))
     v = g.z[np.isfinite(g.z)]
     dxm, dym = g.cell_size_m()
@@ -662,7 +713,8 @@ def render_grid(g, kind, name, out_dir, title, units, png=True, nav=False, wgs84
                 bounds=dict(west=float(g.x[0] - g.dx / 2), east=float(g.x[-1] + g.dx / 2),
                             south=float(g.y[-1] - g.dy / 2), north=float(g.y[0] + g.dy / 2)),
                 value_min=float(v.min()) if v.size else None, value_max=float(v.max()) if v.size else None,
-                valid_fraction=float(valid.mean()), color_range=vr, kind=kind, units=units,
+                valid_fraction=float(valid.mean()), box_coverage=g.meta.get("box_coverage"),
+                color_range=vr, kind=kind, units=units,
                 files=[os.path.basename(str(f)) for f in files], seconds=round(time.time() - t0, 1))
     with open(out_dir / f"{name}_info.json", "w") as f:
         json.dump(info, f, indent=1)
@@ -686,7 +738,7 @@ def render_dataset(ds_id, out_root, png=True, wgs84=True, slope=True, only_slope
         raise FileNotFoundError(f"{ds_id}: no source files match {spec['paths']}")
     infos = []
     for p in paths:
-        g = load(p, spec["epsg"])
+        g = load_ds(ds_id, p)
         stem = ds_id if len(paths) == 1 else f"{ds_id}__{Path(p).stem.replace('_geomapapp', '')}"
         title = spec["label"] + ("" if len(paths) == 1 else f"  [{Path(p).name}]")
         if not only_slope:
@@ -732,7 +784,7 @@ The colour maps are cmocean `deep` for bathymetry, grey for backscatter, RdBu_r 
 ```bash
 source ~/miniforge3/etc/profile.d/conda.sh && conda activate claude-science-env
 cd scripts
-python native_render.py all  --out ../Native_Maps      # every dataset (~10 min, ~7 GB)
+python native_render.py all  --out ../Native_Maps      # every dataset (~15 min, ~10 GB with slope)
 python native_render.py slope --out ../Native_Maps     # slope maps for the bathymetry datasets
 python native_render.py clip Mittelstaedt_50m -91.3 -91.1 0.6 0.8 --out my_box --nav --slope   # any box
 python native_render.py readme --out ../Native_Maps    # this file
@@ -761,10 +813,12 @@ def write_readmes(out):
     out = Path(out)
     rows, n, cells, dss = [], 0, 0, 0
     for ds in DATASETS:
-        infos = []
+        byname = {}
         for f in ("index.json", "slope_index.json"):
             if (out / ds / f).exists():
-                infos += json.load(open(out / ds / f))
+                for i in json.load(open(out / ds / f)):
+                    byname[i["name"]] = i
+        infos = list(byname.values())
         if not infos:
             continue
         dss += 1
@@ -860,9 +914,11 @@ def main():
         print(f"{ds} ...", flush=True)
         render_dataset(ds, args.out, png=not args.no_png, cmap=args.cmap)
     # top-level index = every dataset rendered so far (not just this run)
-    summary = []
+    summary = {}
     for f in sorted(Path(args.out).glob("*/index.json")) + sorted(Path(args.out).glob("*/slope_index.json")):
-        summary += json.load(open(f))
+        for i in json.load(open(f)):
+            summary[i["name"]] = i  # one entry per product (the slope pass re-records slope products)
+    summary = list(summary.values())
     with open(Path(args.out) / "index.json", "w") as f:
         json.dump(summary, f, indent=1)
 

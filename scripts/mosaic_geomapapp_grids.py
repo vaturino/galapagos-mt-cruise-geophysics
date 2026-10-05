@@ -120,23 +120,26 @@ def main():
         z = np.array(nc.variables["z"][:], dtype=np.float32)
         nc.close()
 
-        needs_resample = abs(fdx - dx) / dx > 0.01 or abs(fdy - dy) / dy > 0.01
-        if needs_resample:
-            # nearest-neighbour resample this file's own footprint onto the master spacing
-            out_nx = int(round((fxmax - fxmin) / dx)) + 1
-            out_ny = int(round((fymax - fymin) / dy)) + 1
-            col_idx = np.clip(np.round(np.arange(out_nx) * dx / fdx).astype(int), 0, fnx - 1)
-            row_idx = np.clip(np.round(np.arange(out_ny) * dy / fdy).astype(int), 0, fny - 1)
-            z = z[np.ix_(row_idx, col_idx)]
-            fnx, fny = out_nx, out_ny
-            print(f"  (resampled {os.path.basename(f)} from {fdx:.6f}/{fdy:.6f} deg "
-                  f"to master spacing {dx:.6f}/{dy:.6f} deg)")
-
-        ix0 = int(round((fxmin - xmin) / dx))
-        iy0 = int(round((fymin - ymin) / dy))
-        sub = master[iy0:iy0 + fny, ix0:ix0 + fnx]
-        mask = ~np.isnan(z)
-        sub[mask] = z[mask]
+        # Place by COORDINATES, never by index: every master cell inside this file's footprint takes
+        # the file's nearest cell, located from the file's OWN origin and spacing. (The previous
+        # version pasted tiles at the master spacing with a rounded origin; with tile spacings
+        # differing by up to 0.26 % that drifted tiles by up to several cells -- the MV1007 mosaic
+        # was displaced 30-95 m east of its own source tiles.) Error is now <= half a source cell.
+        j0 = max(0, int(np.ceil((fxmin - fdx / 2 - xmin) / dx)))
+        j1 = min(nx - 1, int(np.floor((fxmax + fdx / 2 - xmin) / dx)))
+        i0 = max(0, int(np.ceil((fymin - fdy / 2 - ymin) / dy)))
+        i1 = min(ny - 1, int(np.floor((fymax + fdy / 2 - ymin) / dy)))
+        col = np.round((xmin + np.arange(j0, j1 + 1) * dx - fxmin) / fdx).astype(int)
+        row = np.round((ymin + np.arange(i0, i1 + 1) * dy - fymin) / fdy).astype(int)
+        okc = (col >= 0) & (col < fnx)
+        okr = (row >= 0) & (row < fny)
+        vals = z[np.ix_(row[okr], col[okc])]
+        rows_m, cols_m = np.arange(i0, i1 + 1)[okr], np.arange(j0, j1 + 1)[okc]
+        sub = master[np.ix_(rows_m, cols_m)]
+        mask = ~np.isnan(vals)
+        sub[mask] = vals[mask]
+        master[np.ix_(rows_m, cols_m)] = sub
+        ix0, iy0 = j0, i0
         print(f"  placed {os.path.basename(f)} at col {ix0}, row {iy0} ({fnx}x{fny})")
 
     zmin = float(np.nanmin(master))

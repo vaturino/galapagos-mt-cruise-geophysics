@@ -266,3 +266,50 @@ the mesh".
 
 **Fixed:** a box outside a grid's coverage now returns "no data in that
 box" instead of failing.
+
+### Operations hardening (2026-10-04 review)
+
+The viewer and server went through an adversarial review before the cruise. What changed for
+whoever runs it at sea:
+
+**Ship feed (`run_viewer.py --ship-feed`).**
+- **Sentence checks:**
+  - Only whole, checksummed NMEA sentences are accepted. A sentence cut off or split across UDP packets is ignored, where before it could produce a false position such as 1°N 8°E.
+  - Anything before the `$` (logger timestamps, tag blocks) is stripped.
+  - `--allow-no-checksum` accepts feeds that don't send `*hh`.
+- **Value checks:**
+  - Values must be finite and in range; NaN or inf used to freeze the display.
+  - Minutes must be under 60, and (0, 0) is rejected.
+  - Degrees are split at the decimal point, so a talker that drops leading zeros still parses correctly.
+- **Fix quality:**
+  - GGA quality must be 1–6; 0 (no fix), 7 (manual) and 8 (simulator) are rejected.
+  - RMC/GLL must be valid (`A`), and RMC/GLL/VTG with mode N or S are rejected, as are THS S and V.
+  - HDG is corrected to true heading when it carries variation; otherwise it's labelled magnetic.
+- **Plain-text input:** plain `lat lon` or `heading` text lines need `--plain-feed`, and must be exactly those numbers.
+- **Port conflicts:** a second program on the same UDP port now makes the viewer report "cannot listen on UDP …" instead of silently losing the feed. Stop `nc -ul` or the other viewer first.
+- **Ages:** ages use the monotonic clock, so a laptop clock step doesn't corrupt them.
+- **Tests:** `python -m pytest tests/test_nmea.py`, 35 tests. Every failure case from the review is included, and the old parser fails 29 of them.
+
+**Ship display.**
+- **Outages:** if the server stops answering, the marker turns grey with "NO UPDATE for N min … STALE". A frozen marker can no longer look live.
+- **Placement:** the marker, direction lines and track are drawn on the displayed seafloor under the ship, not at sea level. At sea level they appeared kilometres off in tilted views.
+- **Course fallback:** course over ground is used for the arrow only if it's under 5 min old and the ship is moving at 1 kn or more. Otherwise the arrow is grey and the label says why ("heading stale" or "no heading feed").
+
+**Dredge lines.**
+- **Depths:** hand-drawn lines now store positive-down depths, so the label and GPX read right before saving.
+- **Drawing safeguards:**
+  - the site is locked when **Draw line** is pressed
+  - a zero-length line is refused
+  - drawing a line and picking a cross-section can't both catch one click
+- **Saving:** saves are serialised and written atomically, and every backup gets its own name in `MT_dredging_coords/backups/`, never overwritten. Validation rejects out-of-range coordinates and duplicate sites. If the depth refresh fails, the page says so: "saved, but the depth refresh FAILED".
+- **Waypoint names:** GPX/KML names match the packets (`D07S`, `D07`, `D07E`).
+
+**Server.**
+- Saves and native exports are refused unless the request comes from the viewer itself. A web page on another site can't trigger them.
+- Request bodies are limited to 5 MB.
+- Native exports run one at a time, are limited to 2° on a side, and accept only known dataset names.
+
+**Elsewhere.**
+- Depth read-outs on the GMRT basemap now remove its 120 m display offset.
+- "Colour map: as built" restores the original colours even after dragging the colour range.
+- The track-CSV loader understands N/S/E/W and degrees-minutes(-seconds), and reports any rows it can't read instead of silently misplacing them.

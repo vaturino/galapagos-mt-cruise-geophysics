@@ -59,4 +59,8 @@ Viewer3D/test_track_points.csv
 
 # generated outputs: native-resolution renders (many GB) and per-dredge packets (include MV1007 clips, non-public)
 Native_Maps/
+Native_Maps_*/
 Dredge_Packets/
+
+# viewer "Save to repo" backups of DredgeLines.csv (local history, not for git)
+MT_dredging_coords/backups/

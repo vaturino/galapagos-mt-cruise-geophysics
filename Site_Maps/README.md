@@ -59,7 +59,7 @@ already placed. Dredge labels are placed first.
 - `lat_ddm`, `lon_ddm`: degrees and decimal minutes (e.g. `1°56.6885' N`),
   the usual bridge format.
 - `lat_dms`, `lon_dms`: degrees, minutes, seconds (e.g. `1°56'41.31" N`).
-  Converting back to decimal matches `lat_dd`/`lon_dd` within 0.6 m. That
+  Converting back to decimal matches `lat_dd`/`lon_dd` within 0.7 m. That
   residual is the rounding of the 5-decimal column; the source values are
   more precise.
 - `depth_listed_m`: depth from the planning file.
@@ -99,8 +99,12 @@ by a median of 7 m, maximum 28 m (D28).
   within 250 m ranges from 2524 to 2585 m.
 - Permit MT stations 23, 25-30, 58, 60 and 91-94 are not in the current
   plan.
-- All 90 MT depths (1591-3495 m) are inside the permit's 1400-3500 m
-  range for seafloor instruments (condition 20).
+- All 90 *listed* MT depths (1591-3495 m) are inside the permit's 1400-3500 m
+  range for seafloor instruments (condition 20). **MT17 is at the limit:** listed
+  3495 m (GMRT point service), but the 50 m grid gives 3502 m at the site, DOA-ETP
+  multibeam 3499 m and the GMRT grid 3503 m, and 42 % of the seafloor within 500 m is
+  deeper than 3500 m. Moving it ~0.5 km to (1.60819, -90.81692) gives ~3440 m on the
+  50 m grid, or flag it to DPNG.
 
 **The permit (PC-103-26) lists no coordinates.** It authorizes an area:
 "cadenas volcanicas y dorsal de expansion adyacente al norte de Galapagos
@@ -108,8 +112,11 @@ by a median of 7 m, maximum 28 m (D28).
 need a SOLICITUD DE INCLUSION (condition 18). Reserve zones from the DPNG
 shapefiles:
 - **Dredge:** 29 of 30 are in the Galapagos MR. **D21** (1.89588 N,
-  91.13062 W) is just inside the **Hermandad No-Take zone**, near the
-  reserve boundary.
+  91.13062 W) is **6.2 km inside the Hermandad No-Take zone** (not near its
+  boundary); dredging there is acceptable (PI, 2026-10-04). **D22**'s site is
+  114 m inside the Galapagos MR, beside a ~1 km gap where the GMR and Hermandad
+  polygons don't meet; its seeded tow ends outside both (flagged BOUNDARY in the
+  dredge packets).
 - **MT:**
   - 75 of 90 are in the Galapagos MR.
   - MT74 is in the Hermandad No-Take zone.

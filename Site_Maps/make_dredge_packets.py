@@ -26,7 +26,9 @@ import argparse
 import datetime as dt
 import json
 import math
+import os
 import shutil
+import sys
 import textwrap
 from pathlib import Path
 
@@ -102,32 +104,37 @@ def cross_profile(lat, lon, az, g, half=1000.0, step=10.0):
 
 
 # ----------------------------------------------------------------------------- exports
+def xesc(v):
+    return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+
 def write_gpx(path, wpts, routes):
     x = ['<?xml version="1.0" encoding="UTF-8"?>',
          '<gpx version="1.1" creator="AT53-04 make_dredge_packets.py" xmlns="http://www.topografix.com/GPX/1/1">']
     for w in wpts:
-        x.append(f'<wpt lat="{w["lat"]:.7f}" lon="{w["lon"]:.7f}"><name>{w["name"]}</name>'
-                 f'<desc>{w["desc"]}</desc></wpt>')
+        x.append(f'<wpt lat="{w["lat"]:.7f}" lon="{w["lon"]:.7f}"><name>{xesc(w["name"])}</name>'
+                 f'<desc>{xesc(w["desc"])}</desc></wpt>')
     for name, desc, pts in routes:
-        x.append(f"<rte><name>{name}</name><desc>{desc}</desc>" + "".join(
-            f'<rtept lat="{p["lat"]:.7f}" lon="{p["lon"]:.7f}"><name>{p["name"]}</name></rtept>' for p in pts) + "</rte>")
+        x.append(f"<rte><name>{xesc(name)}</name><desc>{xesc(desc)}</desc>" + "".join(
+            f'<rtept lat="{p["lat"]:.7f}" lon="{p["lon"]:.7f}"><name>{xesc(p["name"])}</name></rtept>' for p in pts)
+            + "</rte>")
     x.append("</gpx>")
     path.write_text("\n".join(x) + "\n")
 
 
 def write_kml(path, title, wpts, routes):
     x = ['<?xml version="1.0" encoding="UTF-8"?>', '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
-         f"<name>{title}</name>",
-         '<Style id="tow"><LineStyle><color>ff1a8cff</color><width>4</width></LineStyle></Style>',
+         f"<name>{xesc(title)}</name>",
+         '<Style id="tow"><LineStyle><color>ff6f2dff</color><width>4</width></LineStyle></Style>',  # #ff2d6f as aabbggrr
          '<Style id="S"><IconStyle><color>ff4fd12b</color></IconStyle></Style>',
          '<Style id="E"><IconStyle><color>ff3b3bff</color></IconStyle></Style>',
          '<Style id="site"><IconStyle><color>ff1f30d7</color></IconStyle></Style>']
     for name, desc, pts in routes:
         c = " ".join(f'{p["lon"]:.7f},{p["lat"]:.7f},0' for p in pts)
-        x.append(f"<Placemark><name>{name}</name><description>{desc}</description><styleUrl>#tow</styleUrl>"
+        x.append(f"<Placemark><name>{xesc(name)}</name><description>{xesc(desc)}</description><styleUrl>#tow</styleUrl>"
                  f"<LineString><coordinates>{c}</coordinates></LineString></Placemark>")
     for w in wpts:
-        x.append(f'<Placemark><name>{w["name"]}</name><description>{w["desc"]}</description>'
+        x.append(f'<Placemark><name>{xesc(w["name"])}</name><description>{xesc(w["desc"])}</description>'
                  f'<styleUrl>#{w["style"]}</styleUrl><Point><coordinates>{w["lon"]:.7f},{w["lat"]:.7f},0</coordinates>'
                  f"</Point></Placemark>")
     x.append("</Document></kml>")
@@ -135,6 +142,8 @@ def write_kml(path, title, wpts, routes):
 
 
 def waypoints_for(sid, s, ln):
+    """Waypoints DnnS (start), Dnn (permit site), DnnE (end); zero-padded so they sort D01..D30."""
+    sid = f"D{int(s.site):02d}"
     out = []
     for key, lat, lon, depth, what, style in (
             ("S", ln.start_lat, ln.start_lon, ln.start_depth_m, "start of tow", "S"),
@@ -154,9 +163,9 @@ def waypoints_for(sid, s, ln):
 def ddm_formatter(pos, neg):
     def f(v, _):
         h = pos if v >= 0 else neg
-        a = abs(v)
-        d = int(a)
-        return f"{d}°{(a - d) * 60:05.2f}'{h}"
+        u = int(round(abs(v) * 60 * 100))  # hundredths of a minute, so 59.999' never prints as 60.00'
+        d, m = divmod(u, 6000)
+        return f"{d}°{m / 100:05.2f}'{h}"
     return f
 
 
@@ -224,7 +233,8 @@ def map_panel(ax, sid, s, ln, rgb, ext, X, Y, Zbathy, prev, mt, sites):
                     path_effects=[pe.Stroke(linewidth=3.6, foreground="w"), pe.Normal()])
         ax.scatter([q.lon], [q.lat], s=110 if q.glass != "no rock" else 120, marker="X" if q.glass == "no rock" else "o",
                    c=GLASS_C[q.glass], edgecolors="k" if q.glass != "no rock" else "w", linewidths=1.1, zorder=4)
-        ax.annotate(f"{'MV ' if q.cruise == 'MV1007' else ''}{q.station} {int(q.depth)} m\n{q.glass}", (q.lon, q.lat),
+        dtxt = f"{q.depth:.0f} m" if np.isfinite(q.depth) else "depth ?"
+        ax.annotate(f"{'MV ' if q.cruise == 'MV1007' else ''}{q.station} {dtxt}\n{q.glass}", (q.lon, q.lat),
                     xytext=(7, -14), textcoords="offset points", fontsize=7.5, zorder=6, path_effects=WHITE)
     m = mt[mt.longitude.between(lo0, lo1) & mt.latitude.between(la0, la1)]
     ax.scatter(m.longitude, m.latitude, s=70, marker="D", c="#ffd400", edgecolors="k", zorder=4)
@@ -263,7 +273,7 @@ def map_panel(ax, sid, s, ln, rgb, ext, X, Y, Zbathy, prev, mt, sites):
     return step, mstep, len(lv)
 
 
-def draw_sheet(sid, s, ln, g, ds, cell, prev, mt, sites, rep_row, zone, out_png, out_slope_png, pdfs):
+def draw_sheet(sid, s, ln, g, ds, cell, prev, mt, sites, rep_row, zone, out_png, out_slope_png, pdfs, extra_flags=()):
     lat, lon = float(s.latitude), float(s.longitude)
     fig = plt.figure(figsize=(16.54, 11.69))  # A3 landscape
     ax = fig.add_axes([0.04, 0.17, 0.53, 0.73])
@@ -325,8 +335,10 @@ def draw_sheet(sid, s, ln, g, ds, cell, prev, mt, sites, rep_row, zone, out_png,
         a1s.grid(alpha=0.3)
         a1s.legend(fontsize=6.5, loc="upper left", ncol=2, framealpha=0.85)
         on = (d >= 0) & (d <= L)
-        tmean, tmax = float(np.nanmean(terr[on])), float(np.nanmax(terr[on]))
-        frac20 = float(np.nanmean(terr[on] > 20) * 100)
+        tv = terr[on][np.isfinite(terr[on])]
+        tcov = 100.0 * tv.size / max(1, on.sum())  # share of the tow where the grid gives a slope
+        tmean, tmax = (float(tv.mean()), float(tv.max())) if tv.size else (float("nan"), float("nan"))
+        frac20 = float(np.mean(tv > 20) * 100) if tv.size else float("nan")
         cd, cz = cross_profile(lat, lon, az, g)
         a1.axvline(ds_site, color="#d7301f", lw=0.8, ls="--")
         a1s.axvline(ds_site, color="#d7301f", lw=0.8, ls="--")
@@ -349,11 +361,7 @@ def draw_sheet(sid, s, ln, g, ds, cell, prev, mt, sites, rep_row, zone, out_png,
         prof = None
         flags.append("NO TOW LINE PLANNED")
     # table
-    if isinstance(ln.note, str) and ln.note:
-        flags.append(ln.note)
-    if rep_row is not None:
-        flags.append(f"REPEAT SITE: {rep_row.dist_onbottom_km:.1f} km from MV1007 {rep_row.mv1007} "
-                     f"({rep_row.mv_class}: {rep_row.mv_description})")
+    flags = [f_ for f_ in flags if f_ != "NO TOW LINE PLANNED"] + list(extra_flags)
     gd = float(-dp.sample(g, lon, lat)[0])
     if np.isfinite(gd) and abs(gd - s.depth) > 150:
         flags.append(f"grid depth at site {gd:.0f} m vs permit {s.depth:.0f} m")
@@ -372,11 +380,12 @@ def draw_sheet(sid, s, ln, g, ds, cell, prev, mt, sites, rep_row, zone, out_png,
               f"{ln.start_depth_m:.0f} → {ln.end_depth_m:.0f} m, "
               f"end-to-end gradient {ln.mean_slope_deg:.1f}°",
               f"Terrain slope on the tow (over {base:.0f} m): mean {tmean:.1f}°, max {tmax:.1f}°, "
-              f"{frac20:.0f} % of the tow steeper than 20°"]
+              f"{frac20:.0f} % steeper than 20°" + (f" (slope known on only {tcov:.0f} % of the tow)" if tcov < 99 else "")]
     t += [f"Grid: {ds}, {cell:.0f} m cells ({nr.DATASETS[ds]['label']})", f"Reserve zone: {zone}", "",
           "Nearest previous dredges:"]
     for q in nearest_prev(prev, lat, lon).itertuples():
-        t.append(f"  {q.cruise} {q.station}: {q.dist_km:.1f} km, {int(q.depth)} m, {q.glass}"
+        t.append(f"  {q.cruise} {q.station}: {q.dist_km:.1f} km, "
+                 + (f"{q.depth:.0f} m" if np.isfinite(q.depth) else "depth ?") + f", {q.glass}"
                  + (f" ({q.description})" if isinstance(q.description, str) and q.description else ""))
     if flags:
         t += ["", "FLAGS:"] + ["  " + w for f_ in flags for w in textwrap.wrap(f_, 110)]
@@ -439,7 +448,7 @@ Parameters for this site:
 | | |
 |---|---|
 | Bathymetry grid | `{ds}`: {label} |
-| Grid cell size | {cell:.0f} m (the map shows these cells as they are, no resampling) |
+| Grid cell size | {cell:.0f} m (the map shows {display}) |
 | Slope baseline | {base:.0f} m = central difference over {k} cell(s) each side (`--slope-baseline`; default and finest = 2 cells) |
 | Contours | every {step} m, bold every {mstep} m, labels = depth |
 | Planned tow | {towline} |
@@ -464,7 +473,8 @@ Parameters for this site:
 ## Page 1, slope along the tow (below the profile)
 - **Orange fill, terrain slope:** the slope of the seafloor in its steepest direction at each point on the line, whatever that direction is. It comes from the grid by central differences over {base:.0f} m in E-W and N-S: slope = atan(sqrt(dz/dx^2 + dz/dy^2)).
 - **Black line, slope along the tow:** only the component in the tow direction, over the same {base:.0f} m. Positive = climbing towards {sid}E.
-- It is at most the terrain slope. Where the black line sits well below the orange, the tow cuts across the slope rather than straight up it.
+- Where the black line sits well below the orange, the tow cuts across the slope rather than straight up it. (The two use different stencils on the same grid, so on rough ground the black line can locally exceed the orange by a few degrees.)
+- Where the orange is missing, the grid has no data close enough to give a slope; the table says how much of the tow that is.
 - **Dotted lines:** 20 and 30 deg.
 - Slopes from a {cell:.0f} m grid are averages. Real slopes at dredge scale (metres) are steeper and rougher.
 
@@ -478,9 +488,13 @@ Parameters for this site:
 - **Depths:** the start/end depths come from the grid. The site depth is the permit value.
 - **Tow:** length and bearing (geodesic, true), end-to-end gradient, terrain-slope statistics along the tow, grid used, reserve zone, the three nearest previous dredges.
 - **FLAGS:**
-  - `FLAT`: even the best direction climbs less than 3 deg.
-  - `direction from azimuth search`: the line is not straight up the local slope. Seeded lines are the 1 km line through the site that climbs most without cresting and running down the far side.
+  - `FLAT`: the line climbs less than 3 deg end to end.
+  - `CRESTS`: the line goes down more than 10 m after its shallowest point.
+  - `DOWNSLOPE`: it ends deeper than it starts.
+  - `direction from azimuth search`: the seeded line is not straight up the local slope (informational). Seeded lines are the 1 km line through the site that climbs most without going down again anywhere along it.
   - `REPEAT SITE`: within 2 km of an MV1007 dredge that got no glass or no rock.
+  - `BOUNDARY`: the tow crosses a reserve-zone boundary or passes within 250 m of one.
+  - `STALE`: `DredgeLines.csv` disagreed with the values recomputed from the endpoints (every number on the sheet and in the nav files is the recomputed one).
   - Grid-vs-permit depth differences over 150 m.
 
 ## Page 2, slope map
@@ -502,35 +516,39 @@ Regenerate: `cd Site_Maps && python make_dredge_packets.py --sites {site}`
 """
 
 
-def overview_page(pdf, sites, lines):
+def overview_page(pdf, sites, lines, site_flags):
     fig = plt.figure(figsize=(16.54, 11.69))
     fig.suptitle("AT53-04 dredge plan: all sites", x=0.04, ha="left", fontsize=16, fontweight="bold", y=0.97)
     cols = ["site", "start (DDM)", "end (DDM)", "S→E depth m", "km", "az °T", "slope°", "grid", "line", "flags"]
     data = []
     for s in sites.itertuples():
+        fl = " | ".join(site_flags.get(int(s.site), []))
         ln = lines[lines.site == s.site]
-        if not len(ln):
-            data.append([f"D{s.site}"] + ["-"] * 8 + ["no line"])
+        if not len(ln) or not np.isfinite(ln.iloc[0].start_lat):
+            data.append([f"D{s.site:02d}"] + ["-"] * 8 + [textwrap.shorten("NO LINE | " + fl, 70)])
             continue
         ln = ln.iloc[0]
-        data.append([f"D{s.site}", f"{ddm(ln.start_lat, 'N', 'S')} {ddm(ln.start_lon, 'E', 'W')}",
+        data.append([f"D{s.site:02d}", f"{ddm(ln.start_lat, 'N', 'S')} {ddm(ln.start_lon, 'E', 'W')}",
                      f"{ddm(ln.end_lat, 'N', 'S')} {ddm(ln.end_lon, 'E', 'W')}",
                      f"{ln.start_depth_m:.0f}→{ln.end_depth_m:.0f}", f"{ln.length_m / 1000:.2f}",
                      f"{ln.azimuth_deg:.0f}", f"{ln.mean_slope_deg:.1f}", ln.grid,
-                     "hand" if str(ln.source).lower() == "manual" else "auto",
-                     textwrap.shorten(str(ln.note) if isinstance(ln.note, str) else "", 60)])
+                     "hand" if str(ln.source).strip().lower() == "manual" else "auto",
+                     textwrap.shorten(fl, 70)])
     ax = fig.add_axes([0.03, 0.05, 0.94, 0.86])
     ax.axis("off")
     tb = ax.table(cellText=data, colLabels=cols, loc="upper left", cellLoc="left",
-                  colWidths=[0.04, 0.17, 0.17, 0.08, 0.04, 0.05, 0.05, 0.12, 0.04, 0.24])
+                  colWidths=[0.04, 0.17, 0.17, 0.08, 0.04, 0.05, 0.05, 0.11, 0.04, 0.25])
     tb.auto_set_font_size(False)
     tb.set_fontsize(7.5)
     tb.scale(1, 1.25)
+    hot = ("FLAT", "REPEAT", "CRESTS", "DOWNSLOPE", "BOUNDARY", "NO LINE", "NO GRID", "STALE", "FAILED")
     for (r, c), cell in tb.get_celld().items():
         if r == 0:
             cell.set_facecolor("#dfe6ee")
-        elif "FLAT" in data[r - 1][-1] or "REPEAT" in data[r - 1][-1]:
+        elif any(h in data[r - 1][-1] for h in hot):
             cell.set_facecolor("#fff4cc")
+    fig.text(0.03, 0.02, "Shaded rows carry a flag: see that site's sheet and README. Values are recomputed from each "
+             "line's endpoints on the grid named in the 'grid' column.", fontsize=8)
     pdf.savefig(fig)
     plt.close(fig)
 
@@ -542,46 +560,52 @@ Generated {date} by `Site_Maps/make_dredge_packets.py` from
 `MT_dredging_coords/DredgeLines.csv` (the planned tows).
 
 **Planning only.** Positions are WGS-84. Depths come from existing compilation grids (named per
-site). Confirm on the ship's own multibeam before deploying.
+site; they disagree with each other by tens of metres in position and depth). Confirm on the
+ship's own multibeam before deploying.
 
 ## Contents
 
 | File | What |
 |---|---|
-| `Dredge_Plan_Sheets.pdf` | Summary table of all tows (flagged rows shaded), then one A3 sheet per site |
-| `All_Dredge_Lines.gpx` | Every tow as a route `DnnS -> DnnE`, plus waypoints `DnnS`, `Dnn` (permit site), `DnnE` |
-| `All_Dredge_Lines.kml` | The same for Google Earth / most chart plotters |
-| `All_Dredge_Lines.csv` | Line table: start/site/end in decimal degrees, degrees-decimal-minutes and DMS; length, azimuth, depths, slopes, grid, flags |
+| `Dredge_Plan_Sheets.pdf` | Summary table of all tows (flagged rows shaded), then a 2-page A3 sheet per site. A run with `--sites` writes `Dredge_Plan_Sheets_partial_<sites>.pdf` instead and leaves this file alone |
+| `All_Dredge_Lines.gpx` | Every tow as a route `DnnS -> DnnE`, plus waypoints `DnnS`, `Dnn` (permit site), `DnnE`. Rebuilt for ALL sites on every run |
+| `All_Dredge_Lines.kml` | The same for Google Earth and most chart plotters |
+| `All_Dredge_Lines.csv` | Line table: start/site/end in decimal degrees, degrees-decimal-minutes and DMS; length, azimuth, depths, slopes, grid, reserve zones, flags |
 | `All_Dredge_Waypoints.csv` | One row per waypoint (name, lat, lon, DDM, DMS, depth): the simplest import for a nav system |
-| `Dnn/Dnn_sheet.pdf` | Two pages: (1) the planning sheet, (2) the seafloor slope map |
-| `Dnn/Dnn_sheet.png`, `Dnn_slope_map.png` | The same two pages as images |
-| `Dnn/Dnn_waypoints.csv/.gpx/.kml` | That site's three waypoints and its route |
-| `Dnn/Dnn_profile.csv` | Every 10 m along the tow, extended {extend:.0f} m beyond each end: depth, terrain slope (steepest, from the grid cells), gradient along the tow over one cell (+ = climbing), `on_tow` flag |
-| `Dnn/Dnn_<grid>_elev_native.tif` | Float32 depth grid (m, elevation: negative = below sea level), {box:.0f} x {box:.0f} km around the site, the source grid's own cells (no resampling) |
-| `Dnn/Dnn_<grid>_color_native.tif` | RGB picture of the same with hillshade, as a navigation-safe GeoTIFF (classic TIFF, strips, LZW, no alpha; white = no data), plus `.tfw` world file and `.prj` |
-| `Dnn/Dnn_<grid>_slope_deg_native.tif` | Float32 seafloor slope (degrees) on the same cells: central differences between neighbouring cells, true metric spacing, no smoothing |
-| `Dnn/Dnn_<grid>_slope_color_native.tif` | Nav-safe RGB picture of the slope (0-40 deg, pale = flat, dark red = steep) + `.tfw` / `.prj` |
-| `Dnn/Dnn_<backscatter>_value_native.tif`, `_color_native.tif` | The same for a backscatter/sidescan survey where one covers the site (bright = strong return, often fresh lava) |
+| `Repeat_Dredge_Sites_NOTE.md` | Why D07, D25 and D26 are flagged as repeat sites |
+| `Dnn/` | One folder per site; its `Dnn_README.md` explains every plot, parameter and file |
 
-## The sheet
-
-- **Map:** native grid cells, hillshade, depth contours, the tow, previous dredges, MT sites, and rings at 500 m and 1 km.
-- **Along-tow profile:** depth from start to end, plus {extend:.0f} m beyond each end (grey).
-- **Slope along the tow:** orange = terrain slope (the steepest direction at each point, from the grid cells). Black = gradient along the tow direction over one grid cell (+ = climbing). The black line can never exceed the orange.
-- **Profile across the tow:** depth along a 2 km line perpendicular to the tow, through the site. It shows whether the tow runs along a ridge crest (high in the middle) or across a flank (one-sided), and how much room there is to drift sideways before the terrain changes.
-- **Slope map (page 2):** where the steep scarps are, relative to the planned tow.
-
-Grid slopes are cell averages. At dredge scale (metres) real slopes are steeper and rougher than a 50-100 m grid shows.
+Per site: `Dnn_sheet.pdf` (2 pages: plan + slope map) and the same pages as PNG; `Dnn_waypoints.csv/.gpx/.kml`;
+`Dnn_profile.csv` (every 10 m along the tow, {extend:.0f} m beyond each end); and native-resolution
+GeoTIFF clips ({box:.0f} x {box:.0f} km) of the finest grid: elevation (float32), slope (float32, degrees),
+and colour pictures of both, plus backscatter where a survey covers the site. **All GeoTIFFs in the
+packets are navigation-safe**: classic strip TIFF, LZW (no predictor), no alpha, no-data -9999 for the
+value grids and white for the pictures, each with a `.tfw` world file and `.prj`.
 
 ## Conventions
 
-- **Waypoint names:** `D07S` = start of tow, `D07` = permit site, `D07E` = end of tow.
-- **Tow direction** is start to end. Seeded lines run upslope (deep to shallow) through the site, 1 km long.
+- **Waypoint names:** `D07S` = start of tow, `D07` = permit site, `D07E` = end of tow (zero-padded, so they sort).
+- **Tow direction** is start to end. Seeded lines are 1 km long through the site, in the direction that climbs
+  most without going down again anywhere along the line (`dredge_plan.py`). They are first guesses.
 - **Azimuth** is the geodesic bearing start to end, degrees true. Lengths are geodesic on WGS-84.
-- **Depth** is positive down in tables and profiles. The elevation GeoTIFFs keep the source sign (negative below sea level).
-- **Line labels:** `auto` = first guess from `dredge_plan.py` (upslope through the site, from a plane fit over max(250 m, 2.5 cells)). `hand` = edited in the 3D viewer or by hand.
-- **FLAT flag:** the fitted slope is under 3 deg, so the direction is arbitrary. Choose it on the sheet.
-- **REPEAT SITE flag:** within 2 km of an MV1007 dredge that got no glass or no rock (see `Repeat_Dredge_Sites_NOTE.md`).
+- **Depth** is positive down in tables and profiles; the elevation GeoTIFFs are elevation (negative below sea level).
+- **Every number about a line** (length, bearing, start/end depth, slopes) is recomputed from its endpoints on the
+  grid named in the table, so the packets are right even if `DredgeLines.csv` is stale (that is flagged STALE).
+- **Flags:**
+  - `FLAT`: the best line climbs less than 3 deg.
+  - `CRESTS`: the line goes down more than 10 m after its shallowest point.
+  - `DOWNSLOPE`: it ends deeper than it starts.
+  - `REPEAT SITE`: within 2 km of an MV1007 dredge that got no glass or no rock.
+  - `BOUNDARY`: the tow crosses a reserve-zone boundary, or passes within 250 m of one.
+  - `NO GRID` / `NO LINE`: as named.
+  - `STALE`: `DredgeLines.csv` disagreed with the recomputed numbers.
+- **Two slopes** on the sheets:
+  - *Terrain slope* is the steepest-direction slope from the grid (central differences over 2 cells).
+  - *Slope along the tow* is only the component in the tow direction, over the same width.
+  - Both are computed from the same grid but on different stencils, so the along-tow value can occasionally
+    exceed the terrain value by a few degrees on rough ground.
+  - The table's "max" slope is the terrain slope; the CSV column `max_slope_10m_deg` is the steepest 10 m
+    step of the along-tow profile.
 
 ## Regenerate
 
@@ -589,17 +613,145 @@ Grid slopes are cell averages. At dredge scale (metres) real slopes are steeper 
 source ~/miniforge3/etc/profile.d/conda.sh && conda activate claude-science-env
 cd galapagos-mt-cruise-geophysics/Site_Maps
 python dredge_plan.py seed            # only adds lines for sites without one; never touches hand-edited lines
-python make_dredge_packets.py         # all sites  (or: --sites 7 25 26)
+python make_dredge_packets.py         # all sites  (or: --sites 7 25 26 -> partial PDF, all nav files still rebuilt)
 ```
 
 To edit a line, use the 3D viewer: Dredge lines, pick a site, then **Draw line** and **Save to repo**.
-Or edit `DredgeLines.csv` and run `python dredge_plan.py refresh`. Then rerun this script.
+Or edit `DredgeLines.csv` and run `python dredge_plan.py refresh` (edited rows become `manual`). Then rerun
+this script.
 """
+
+MARKER = ".at5304_dredge_packets"
+
+
+def line_truth(s, ln, rmg_m, rmh_m, to_m):
+    """Recompute everything about one planned line from its endpoints. Returns (ln2, grid tuple, flags):
+    ln2 is ln with length/azimuth/depths/slopes replaced by values recomputed on the finest grid that
+    covers the line, flags lists every problem found."""
+    from shapely.geometry import LineString
+    flags = []
+    ln2 = ln.copy()
+    has_line = all(np.isfinite([ln.start_lat, ln.start_lon, ln.end_lat, ln.end_lon]))
+    req = [(ln.start_lat, ln.start_lon), (ln.end_lat, ln.end_lon)] if has_line else []
+    bg = dp.best_grid(s.latitude, s.longitude, half_km=HALF_KM, require=req)
+    if bg is None and has_line:
+        bg = dp.best_grid(s.latitude, s.longitude, half_km=HALF_KM)
+        if bg is not None:
+            flags.append("NO GRID covers the whole line: values from the grid at the site")
+    if bg is None:
+        flags.append("NO GRID covers this site")
+        return ln2, None, flags, has_line
+    ds, cell, g = bg
+    if not has_line:
+        flags.append("NO LINE planned")
+        return ln2, bg, flags, has_line
+    st = dp.line_stats(ln.start_lat, ln.start_lon, ln.end_lat, ln.end_lon, g)
+    new = dict(length_m=round(st["length"], 1), azimuth_deg=round(st["azimuth"], 1),
+               start_depth_m=round(float(st["depth"][0]), 0), end_depth_m=round(float(st["depth"][-1]), 0),
+               mean_slope_deg=round(st["mean_slope"], 1), max_slope_deg=round(st["max_slope"], 1),
+               grid=ds, grid_cell_m=round(cell, 1))
+    stale = []
+    for k, tol in (("length_m", 1.0), ("azimuth_deg", 0.5), ("start_depth_m", 10.0), ("end_depth_m", 10.0)):
+        old = ln.get(k)
+        if not (isinstance(old, (int, float)) and np.isfinite(old) and abs(old - new[k]) <= tol):
+            stale.append(f"{k} {old} -> {new[k]}")
+    if stale:
+        flags.append("STALE DredgeLines.csv (recomputed here; run dredge_plan.py refresh): " + "; ".join(stale))
+    for k, v in new.items():
+        ln2[k] = v
+    drop = dp.max_descent(st["depth"])
+    if drop > 10:
+        flags.append(f"CRESTS: the tow goes down {drop:.0f} m after its shallowest point")
+    if st["depth"][-1] > st["depth"][0] + 5:
+        flags.append(f"DOWNSLOPE: ends {st['depth'][-1] - st['depth'][0]:.0f} m deeper than it starts")
+    # reserve zones at start / site / end, and boundary crossing or proximity (metric, UTM 15N)
+    from shapely.geometry import Point as P
+    pts = [(ln.start_lon, ln.start_lat), (s.longitude, s.latitude), (ln.end_lon, ln.end_lat)]
+    zones = reserve_zone([P(*p) for p in pts], rmg_m["ll"], rmh_m["ll"])
+    if len(set(zones)) > 1:
+        flags.append(f"BOUNDARY: tow crosses reserve zones (start {zones[0]}, site {zones[1]}, end {zones[2]})")
+    else:
+        xy = [to_m.transform(*p) for p in pts]
+        line_m = LineString([xy[0], xy[2]])
+        dmin = min(min(geom.boundary.distance(line_m) for geom in rmg_m["m"].geometry),
+                   min(geom.boundary.distance(line_m) for geom in rmh_m["m"].geometry))
+        if dmin < 250:
+            flags.append(f"BOUNDARY: tow passes {dmin:.0f} m from a reserve-zone boundary ({zones[1]})")
+    ln2["zones"] = " / ".join(dict.fromkeys(zones))
+    return ln2, bg, flags, has_line
+
+
+def build_site(s, ln, bg, flags, has_line, prev, mt, sites, rep_row, zone, out, pdfs):
+    """Render one site's folder into out/.tmp_Dnn, then swap it into place (atomic per site)."""
+    sid, tag = f"D{s.site:02d}", f"D{s.site:02d}"
+    ds, cell, g = bg
+    tmp = out / f".tmp_{tag}"
+    if tmp.exists():
+        shutil.rmtree(tmp)
+    tmp.mkdir()
+    with PdfPages(tmp / f"{tag}_sheet.pdf") as p1:  # 2 pages: plan + slope map
+        prof, sheet_flags, sinfo = draw_sheet(sid, s, ln, g, ds, cell, prev, mt, sites, rep_row, zone,
+                                              tmp / f"{tag}_sheet.png", tmp / f"{tag}_slope_map.png", list(pdfs) + [p1],
+                                              extra_flags=flags)
+    if prof is not None:
+        prof.to_csv(tmp / f"{tag}_profile.csv", index=False)
+    w = waypoints_for(sid, s, ln)
+    pd.DataFrame(w).drop(columns=["style", "desc"]).to_csv(tmp / f"{tag}_waypoints.csv", index=False)
+    route = route_for(s, ln, w)
+    write_gpx(tmp / f"{tag}_waypoints.gpx", w, route)
+    write_kml(tmp / f"{tag}_waypoints.kml", f"AT53-04 {tag}", w, route)
+    box = dp.box_around(s.latitude, s.longitude, HALF_KM)
+    gclip = nr.clip(ds, box)
+    nr.render_grid(gclip, "bathy", f"{tag}_{ds}", tmp, nr.DATASETS[ds]["label"], "m", png=False, nav=True,
+                   wgs84=not gclip.geographic, sites=False, cmap=OPTS["bathy_cmap"])
+    nr.render_slope(gclip, f"{tag}_{ds}", tmp, nr.DATASETS[ds]["label"], png=False, nav=True,
+                    wgs84=not gclip.geographic, sites=False, baseline_m=OPTS["slope_baseline"], cmap=OPTS["slope_cmap"])
+    for bs in BACKSCATTER:
+        bc = nr.clip(bs, box)
+        if bc is not None and np.isfinite(bc.z).mean() > 0.2:
+            nr.render_grid(bc, "backscatter", f"{tag}_{bs}", tmp, nr.DATASETS[bs]["label"], "amplitude",
+                           png=False, nav=True, wgs84=not bc.geographic, sites=False)
+    for f in tmp.glob("*_info.json"):  # one combined info file per packet
+        f.unlink()
+    towline = (f"{sinfo['L']:.0f} m at {sinfo['az']:.1f} deg T, {ln.start_depth_m:.0f} -> {ln.end_depth_m:.0f} m"
+               if sinfo["has_line"] else "none")
+    site_note = ""
+    if sinfo["has_line"]:
+        site_note = f" ({sinfo['ds_site']:.0f} m from {tag}S" + (
+            f", {sinfo['off_site']:.0f} m off the line)" if sinfo["off_site"] > 25 else ")")
+    json.dump(dict({k: (None if isinstance(v, float) and not np.isfinite(v) else v) for k, v in ln.items()},
+                   site=tag, permit_lat=float(s.latitude), permit_lon=float(s.longitude), permit_depth_m=float(s.depth),
+                   grid=ds, grid_cell_m=round(cell, 1), site_reserve_zone=zone, flags=list(dict.fromkeys(sheet_flags)),
+                   slope_baseline_m=sinfo["base"]),
+              open(tmp / f"{tag}_info.json", "w"), indent=1, default=str)
+    (tmp / f"{tag}_README.md").write_text(SITE_README.format(
+        sid=tag, tag=tag, site=s.site, ds=ds, label=nr.DATASETS[ds]["label"], cell=cell, base=sinfo["base"],
+        k=int(round(sinfo["base"] / cell / 2)), step=sinfo["step"], mstep=sinfo["mstep"], towline=towline,
+        zone=zone, source="hand-edited" if str(ln.source).strip().lower() == "manual" else "auto first guess",
+        site_note=site_note, display=("the grid's own cells (no resampling)" if g.geographic else
+                                      f"the grid (EPSG:{g.epsg}) reprojected to lon/lat for display; GeoTIFFs native")))
+    dst = out / tag
+    old = out / f".old_{tag}"
+    if dst.exists():
+        dst.rename(old)
+    tmp.rename(dst)
+    if old.exists():
+        shutil.rmtree(old)
+    return sheet_flags, sinfo
+
+
+def route_for(s, ln, w):
+    if not (np.isfinite(ln.start_lat) and np.isfinite(ln.end_lat)) or len(w) < 2:
+        return []
+    tag = f"D{s.site:02d}"
+    return [(tag, f"{ln.length_m:.0f} m at {ln.azimuth_deg:.1f} deg T, {ln.start_depth_m:.0f} -> {ln.end_depth_m:.0f} m",
+             [w[0], w[-1]])]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--sites", nargs="*", type=int, default=None)
+    ap.add_argument("--sites", nargs="*", type=int, default=None,
+                    help="render only these sites (partial PDF); the all-site nav files are always rebuilt")
     ap.add_argument("--out", default=str(REPO / "Dredge_Packets"))
     ap.add_argument("--slope-baseline", type=float, default=None,
                     help="slope central-difference width in m (default: 2 grid cells, the finest)")
@@ -607,92 +759,97 @@ def main():
     ap.add_argument("--slope-cmap", default=None, help="slope colour map (default YlOrRd)")
     a = ap.parse_args()
     OPTS.update(slope_baseline=a.slope_baseline, bathy_cmap=a.bathy_cmap, slope_cmap=a.slope_cmap)
-    out = Path(a.out)
+    out = Path(a.out).resolve()
+    # never delete or overwrite inside a folder this script did not create
+    if out.exists() and any(out.iterdir()) and not (out / MARKER).exists():
+        sys.exit(f"{out} exists, is not empty and is not a dredge-packet folder (no {MARKER}); refusing to write there")
     out.mkdir(parents=True, exist_ok=True)
+    (out / MARKER).write_text("created by Site_Maps/make_dredge_packets.py\n")
     sites, lines, prev, mt, rep, rmg, rmh = load_inputs()
-    todo = sites if a.sites is None else sites[sites.site.isin(a.sites)]
+    from pyproj import Transformer
+    rmg_m = {"ll": rmg, "m": rmg.to_crs(32615)}
+    rmh_m = {"ll": rmh, "m": rmh.to_crs(32615)}
+    to_m = Transformer.from_crs(4326, 32615, always_xy=True)
+
+    # 1. every site: recompute line values, zones, flags (cheap); build the nav files for ALL sites
+    truth = {}
+    for s in sites.itertuples():
+        lrow = lines[lines.site == s.site]
+        ln = lrow.iloc[0] if len(lrow) else pd.Series({c: np.nan for c in dp.COLUMNS})
+        ln2, bg, flags, has_line = line_truth(s, ln, rmg_m, rmh_m, to_m)
+        if rep is not None and (rep.permit_site == f"D{s.site}").any():
+            r = rep[rep.permit_site == f"D{s.site}"].iloc[0]
+            flags.append(f"REPEAT SITE: {r.dist_onbottom_km:.1f} km from MV1007 {r.mv1007} ({r.mv_class}: {r.mv_description})")
+        note = ln.get("note")
+        if isinstance(note, str) and note.strip():  # CSV notes, minus what was just recomputed above
+            keep = [p_.strip() for p_ in note.split(";") if p_.strip() and not p_.strip().startswith(("CRESTS", "NO GRID", "check the profile"))]
+            if keep:
+                flags.append("; ".join(keep))
+        zone = reserve_zone([Point(s.longitude, s.latitude)], rmg, rmh)[0]
+        truth[int(s.site)] = (s, ln2, bg, flags, has_line, zone)
+    lines2 = pd.DataFrame([t[1] for t in truth.values() if t[4]])
+    site_flags = {k: v[3] for k, v in truth.items()}
+
     all_w, all_r, all_rows = [], [], []
-    with PdfPages(out / "Dredge_Plan_Sheets.pdf") as pdf:
-        overview_page(pdf, sites, lines)
-        for s in todo.itertuples():
-            sid, tag = f"D{s.site}", f"D{s.site:02d}"
-            d = out / tag
-            if d.exists():
-                shutil.rmtree(d)
-            d.mkdir()
-            lrow = lines[lines.site == s.site]
-            ln = lrow.iloc[0] if len(lrow) else pd.Series({c: np.nan for c in dp.COLUMNS})
-            req = [(ln.start_lat, ln.start_lon), (ln.end_lat, ln.end_lon)] if np.isfinite(ln.start_lat) else []
-            bg = dp.best_grid(s.latitude, s.longitude, half_km=HALF_KM, require=req) or \
-                dp.best_grid(s.latitude, s.longitude, half_km=HALF_KM)
-            ds, cell, g = bg
-            zone = reserve_zone([Point(s.longitude, s.latitude)], rmg, rmh)[0]
-            rep_row = None
-            if rep is not None and (rep.permit_site == sid).any():
-                rep_row = rep[rep.permit_site == sid].iloc[0]
-            with PdfPages(d / f"{tag}_sheet.pdf") as p1:  # 2 pages: plan + slope map
-                prof, flags, sinfo = draw_sheet(sid, s, ln, g, ds, cell, prev, mt, sites, rep_row, zone,
-                                         d / f"{tag}_sheet.png", d / f"{tag}_slope_map.png", [pdf, p1])
-            if prof is not None:
-                prof.to_csv(d / f"{tag}_profile.csv", index=False)
-            w = waypoints_for(sid, s, ln)
-            pd.DataFrame(w).drop(columns=["style", "desc"]).to_csv(d / f"{tag}_waypoints.csv", index=False)
-            route = [] if not np.isfinite(ln.start_lat) else [(sid, f"{ln.length_m:.0f} m at {ln.azimuth_deg:.1f} deg T, "
-                                                                     f"{ln.start_depth_m:.0f} -> {ln.end_depth_m:.0f} m",
-                                                                     [w[0], w[-1]])]
-            write_gpx(d / f"{tag}_waypoints.gpx", w, route)
-            write_kml(d / f"{tag}_waypoints.kml", f"AT53-04 {sid}", w, route)
-            all_w += w
-            all_r += route
-            # native-resolution GeoTIFF clips (nav-safe colour + float32 elevation)
-            box = dp.box_around(s.latitude, s.longitude, HALF_KM)
-            gclip = nr.clip(ds, box)
-            nr.render_grid(gclip, "bathy", f"{tag}_{ds}", d, nr.DATASETS[ds]["label"], "m", png=False, nav=True,
-                           wgs84=not gclip.geographic, sites=False, cmap=OPTS["bathy_cmap"])
-            nr.render_slope(gclip, f"{tag}_{ds}", d, nr.DATASETS[ds]["label"], png=False, nav=True,
-                            wgs84=not gclip.geographic, sites=False, baseline_m=OPTS["slope_baseline"],
-                            cmap=OPTS["slope_cmap"])
-            towline = (f"{sinfo['L']:.0f} m at {sinfo['az']:.1f} deg T, {ln.start_depth_m:.0f} -> {ln.end_depth_m:.0f} m"
-                       if sinfo["has_line"] else "none")
-            site_note = ""
-            if sinfo["has_line"]:
-                site_note = f" ({sinfo['ds_site']:.0f} m from {sid}S" + (
-                    f", {sinfo['off_site']:.0f} m off the line)" if sinfo["off_site"] > 25 else ")")
-            (d / f"{tag}_README.md").write_text(SITE_README.format(
-                sid=sid, tag=tag, site=s.site, ds=ds, label=nr.DATASETS[ds]["label"], cell=cell, base=sinfo["base"],
-                k=int(round(sinfo["base"] / cell / 2)), step=sinfo["step"], mstep=sinfo["mstep"], towline=towline,
-                zone=zone, source="hand-edited" if str(ln.source).lower() == "manual" else "auto first guess",
-                site_note=site_note))
-            for bs in BACKSCATTER:
-                bc = nr.clip(bs, box)
-                if bc is not None and np.isfinite(bc.z).mean() > 0.2:
-                    nr.render_grid(bc, "backscatter", f"{tag}_{bs}", d, nr.DATASETS[bs]["label"], "amplitude",
-                                   png=False, nav=True, wgs84=not bc.geographic, sites=False)
-            for f in d.glob("*_info.json"):  # keep the packet tidy: one combined info file
-                f.unlink()
-            row = dict(site=sid)
-            for k, (la_, lo_) in (("start", (ln.start_lat, ln.start_lon)), ("site", (s.latitude, s.longitude)),
-                                  ("end", (ln.end_lat, ln.end_lon))):
-                if np.isfinite(la_):
-                    row.update({f"{k}_lat_dd": round(la_, 6), f"{k}_lon_dd": round(lo_, 6),
-                                f"{k}_lat_ddm": ddm(la_, "N", "S"), f"{k}_lon_ddm": ddm(lo_, "E", "W"),
-                                f"{k}_lat_dms": dms(la_, "N", "S"), f"{k}_lon_dms": dms(lo_, "E", "W")})
-            row.update(permit_depth_m=s.depth, start_depth_m=ln.start_depth_m, end_depth_m=ln.end_depth_m,
-                       length_m=ln.length_m, azimuth_deg=ln.azimuth_deg, mean_slope_deg=ln.mean_slope_deg,
-                       max_slope_deg=ln.max_slope_deg, grid=ds, grid_cell_m=round(cell, 1), line_source=ln.source,
-                       reserve_zone=zone, flags=" | ".join(flags))
-            all_rows.append(row)
-            json.dump(row, open(d / f"{tag}_info.json", "w"), indent=1, default=str)
-            print(f"{tag}: {ds} ({cell:.0f} m), {len(list(d.iterdir()))} files" + (f"  FLAGS: {' | '.join(flags)}" if flags else ""),
-                  flush=True)
-    if a.sites is None:
-        write_gpx(out / "All_Dredge_Lines.gpx", all_w, all_r)
-        write_kml(out / "All_Dredge_Lines.kml", "AT53-04 dredge lines", all_w, all_r)
-        pd.DataFrame(all_rows).to_csv(out / "All_Dredge_Lines.csv", index=False)
-        pd.DataFrame(all_w).drop(columns=["style", "desc"]).to_csv(out / "All_Dredge_Waypoints.csv", index=False)
-        (out / "README.md").write_text(README.format(date=dt.date.today().isoformat(), extend=EXTEND_M, box=2 * HALF_KM))
-    print(f"done: {out}")
+    for k, (s, ln2, bg, flags, has_line, zone) in truth.items():
+        w = waypoints_for(f"D{s.site}", s, ln2)
+        all_w += w
+        all_r += route_for(s, ln2, w)
+        row = dict(site=f"D{s.site:02d}")
+        for key, (la_, lo_) in (("start", (ln2.start_lat, ln2.start_lon)), ("site", (s.latitude, s.longitude)),
+                                ("end", (ln2.end_lat, ln2.end_lon))):
+            if np.isfinite(la_):
+                row.update({f"{key}_lat_dd": round(la_, 6), f"{key}_lon_dd": round(lo_, 6),
+                            f"{key}_lat_ddm": ddm(la_, "N", "S"), f"{key}_lon_ddm": ddm(lo_, "E", "W"),
+                            f"{key}_lat_dms": dms(la_, "N", "S"), f"{key}_lon_dms": dms(lo_, "E", "W")})
+        row.update(permit_depth_m=s.depth, start_depth_m=ln2.start_depth_m, end_depth_m=ln2.end_depth_m,
+                   length_m=ln2.length_m, azimuth_deg=ln2.azimuth_deg, end_to_end_gradient_deg=ln2.mean_slope_deg,
+                   max_slope_10m_deg=ln2.max_slope_deg, grid=bg[0] if bg else "", grid_cell_m=round(bg[1], 1) if bg else "",
+                   line_source=ln2.source, site_reserve_zone=zone, tow_reserve_zones=ln2.get("zones", ""),
+                   flags=" | ".join(flags))
+        all_rows.append(row)
+    write_gpx(out / "All_Dredge_Lines.gpx", all_w, all_r)
+    write_kml(out / "All_Dredge_Lines.kml", "AT53-04 dredge lines", all_w, all_r)
+    pd.DataFrame(all_rows).to_csv(out / "All_Dredge_Lines.csv", index=False)
+    pd.DataFrame(all_w).drop(columns=["style", "desc"]).to_csv(out / "All_Dredge_Waypoints.csv", index=False)
+    (out / "README.md").write_text(README.format(date=dt.date.today().isoformat(), extend=EXTEND_M, box=2 * HALF_KM))
+    note_src = HERE / "Repeat_Dredge_Sites_NOTE.md"
+    if note_src.exists():
+        shutil.copy2(note_src, out / note_src.name)
+
+    # 2. render the requested sites (each atomically); the combined PDF goes to a temp file first
+    todo = [k for k in truth if a.sites is None or k in a.sites]
+    pdf_name = "Dredge_Plan_Sheets.pdf" if a.sites is None else \
+        "Dredge_Plan_Sheets_partial_" + "_".join(f"D{k:02d}" for k in todo) + ".pdf"
+    pdf_tmp = out / f".{pdf_name}.tmp"
+    failed = []
+    with PdfPages(pdf_tmp) as pdf:
+        overview_page(pdf, sites, lines2, site_flags)
+        for k in todo:
+            s, ln2, bg, flags, has_line, zone = truth[k]
+            tag = f"D{k:02d}"
+            if bg is None:
+                failed.append(f"{tag}: no bathymetry grid covers this site")
+                print(f"{tag}: SKIPPED (no grid)", flush=True)
+                continue
+            try:
+                build_site(s, ln2, bg, flags, has_line, prev, mt, sites, None, zone, out, [pdf])
+                print(f"{tag}: {bg[0]} ({bg[1]:.0f} m)" + (f"  FLAGS: {' | '.join(flags)}" if flags else ""), flush=True)
+            except Exception as e:  # one bad site must not take the others (or the combined PDF) down
+                failed.append(f"{tag}: {type(e).__name__}: {e}")
+                print(f"{tag}: FAILED {type(e).__name__}: {e}", flush=True)
+                tmp = out / f".tmp_{tag}"
+                if tmp.exists():
+                    shutil.rmtree(tmp)
+    os.replace(pdf_tmp, out / pdf_name)
+    if failed:
+        (out / "FAILED_SITES.txt").write_text("\n".join(failed) + "\n")
+        print("\nFAILED:\n  " + "\n  ".join(failed))
+    elif (out / "FAILED_SITES.txt").exists() and a.sites is None:
+        (out / "FAILED_SITES.txt").unlink()
+    print(f"done: {out}  ({pdf_name})")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

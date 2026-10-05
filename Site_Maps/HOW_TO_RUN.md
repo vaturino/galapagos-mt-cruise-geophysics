@@ -6,7 +6,9 @@ repo, not from here**: they find the bathymetry grids and the site files
 relative to the repo folder.
 
 - Repo on this machine: `/media/tmittal/extradrive1/galapagos-mt-cruise-geophysics/`
-- GitHub: https://github.com/vaturino/galapagos-mt-cruise-geophysics (`main`)
+- GitHub: https://github.com/vaturino/galapagos-mt-cruise-geophysics. **Branch `TM_version`**:
+  the dredge lines, packets, native maps and the current viewer are only there until it is
+  merged into `main`.
 - The scripts live in `galapagos-mt-cruise-geophysics/Site_Maps/`.
 
 A full run takes about 35 s on this machine.
@@ -16,7 +18,7 @@ A full run takes about 35 s on this machine.
 ```bash
 source ~/miniforge3/etc/profile.d/conda.sh && conda activate claude-science-env
 cd /media/tmittal/extradrive1/galapagos-mt-cruise-geophysics
-git pull
+git checkout TM_version && git pull
 cd Site_Maps
 python make_site_maps.py            # ~16 s  site maps + coordinate tables
 python compare_dredge_lists.py      # ~2 s   permit vs 29-Sep comparison
@@ -100,7 +102,7 @@ source ~/miniforge3/etc/profile.d/conda.sh && conda activate claude-science-env 
 On another machine, make an equivalent environment:
 
 ```bash
-conda create -n sitemaps -c conda-forge python=3.11 numpy scipy pandas matplotlib cartopy geopandas shapely rasterio cmocean openpyxl
+conda create -n sitemaps -c conda-forge python=3.11 numpy scipy pandas matplotlib cartopy geopandas shapely rasterio pyproj cmocean cmcrameri openpyxl pytest
 ```
 
 The repo's own `scripts/venv` is **not** enough: it has no cartopy,
@@ -126,7 +128,8 @@ rsync -a --delete ../Dredge_Packets/ "$T/5_Dredge_Packets/"
   `MT_dredging_coords/DredgeSites.csv` / `MTsites.csv`. Keep the columns
   `site,latitude,longitude,depth,status`: site numbers 1..N with no gaps,
   west longitude negative, depth in metres positive down. Then re-run all
-  four scripts. If a site's listed depth is more than 300 m off the
+  six scripts (the four map scripts, then `dredge_plan.py seed` and
+  `make_dredge_packets.py`). If a site's listed depth is more than 300 m off the
   bathymetry, `make_site_maps.py` prints a `FLAG` line and highlights the
   cell orange in the PDF tables.
 - **Colour range too narrow or wide:** `site_depth_range()` in

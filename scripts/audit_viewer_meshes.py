@@ -42,6 +42,11 @@ SOURCES = {
     "DRFT04RR": ([B + "DRFT04RR_GSC_Bathymetry/galapagos.100m.comb_geomapapp.grd"], "z_m", None),
     "TN188": (sorted(glob.glob(B + "TN188_GSC_Bathymetry_8m/TN188_*_geomapapp.grd")), "z_m", None),
     "Mittelstaedt_Galapagos_Bathy": ([MITTEL_BATH], "z_m", None),
+    # the four native-50 m tiles (FOR_TUSHAR/tiles_50m/ crops of the same grid; checked against the full grid)
+    "Mittelstaedt_50m_NW": ([MITTEL_BATH], "z_m", None),
+    "Mittelstaedt_50m_NE": ([MITTEL_BATH], "z_m", None),
+    "Mittelstaedt_50m_SW": ([MITTEL_BATH], "z_m", None),
+    "Mittelstaedt_50m_SE": ([MITTEL_BATH], "z_m", None),
     "Geophys_Barckhausen_Magnetics": ([G + "Barckhausen_CentralAmerica_Magnetics/central_america_mag_geomapapp.grd"], "value", BASEMAP),
     "Geophys_Bassett_ResidualGravity": ([G + "Bassett_CentralAmerica_ResidualGravity/CentAm_Residual_gravity_geomapapp.grd"], "value", BASEMAP),
     "Geophys_SR1806_MBA": ([G + "SR1806_CocosNazca_Gravity/105W95W1S5N_mba.grd"], "value", BASEMAP),

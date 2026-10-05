@@ -78,8 +78,7 @@ def test_clip_matches_source_exactly(tmp_path, ds, box):
     dv, dc = _pixel_centre_check(f, g)
     assert dv == 0.0 and dc < 1e-6, (dv, dc)
     # clip = same numbers as reading the whole source file (window logic is not shifting)
-    full = nr.load(nr.source_files(ds)[0] if ds != "GMRT_corridor" else nr.source_files(ds)[0],
-                   nr.DATASETS[ds]["epsg"])
+    full = nr.load_ds(ds, nr.source_files(ds)[0])
     i0 = int(np.argmin(np.abs(full.x - g.x[0])))
     j0 = int(np.argmin(np.abs(full.y - g.y[0])))
     assert abs(full.x[i0] - g.x[0]) < 1e-9 and abs(full.y[j0] - g.y[0]) < 1e-9
@@ -222,3 +221,84 @@ def test_slope_baseline_matches_central_difference_transfer_function(k):
     w = 2 * np.pi * k * d / lam
     want = A * 2 * np.pi / lam * np.sin(w) / w
     assert abs(got - want) / want < 0.01, (k, got, want)
+
+
+# ---------------------------------------------------------------- 2026-10-04 review regressions
+def test_drft_bathymetry_is_elevation_and_matches_gsc():
+    """DRFT04RR grids store positive depth; after load_ds they must agree in SIGN with GSC."""
+    for ds, box in (("DRFT04RR_bathymetry_100m", (-91.2, -90.9, -0.2, 0.1)),
+                    ("DRFT04RR_86W_bathymetry_10m", (-86.1, -86.0, 0.75, 0.85))):
+        g = nr.clip(ds, box)
+        ref = nr.clip("GSC_97-86W_100m", box)
+        assert np.nanmedian(g.z) < 0, ds
+        c, _ = _corr_on_common(g, ref)
+        assert c > 0.9, (ds, c)
+
+
+def test_bathy_sign_guard_raises_on_positive_depth():
+    g = nr.load(nr.source_files("DRFT04RR_bathymetry_100m")[0], 4326)
+    assert np.nanmedian(g.z) > 0  # raw file is depth
+    spec = dict(nr.DATASETS["DRFT04RR_bathymetry_100m"])
+    nr.DATASETS["_tmp_wrong"] = dict(spec, positive_down=False)
+    try:
+        with pytest.raises(ValueError):
+            nr.load_ds("_tmp_wrong", nr.source_files("DRFT04RR_bathymetry_100m")[0])
+    finally:
+        del nr.DATASETS["_tmp_wrong"]
+
+
+def test_at5009_inf_nodata_removed_and_no_fake_cliffs(tmp_path):
+    box = (-90.85, -90.60, 0.20, 0.50)
+    g = nr.load(nr.REPO / nr.B / "AT50-09BC_GalapagosPlatform_Bathymetry/AT5009_MB_PintaRift_WGS84_20m.grd", 4326,
+                nr.lonlat_bbox_to_crs(box, 4326))
+    assert not np.isinf(g.z).any() and np.isnan(g.z).any()
+    s = nr.slope_grid(g).z
+    assert np.nanmax(s) < 89.0 and np.nanmean(s > 60) < 1e-3
+    f = nr.write_elev_tif(g, tmp_path / "a.tif", overviews=False)
+    with rasterio.open(f) as d:
+        assert not np.isinf(d.read(1)).any()
+
+
+def test_clip_prefers_grid_covering_the_requested_box():
+    """A small fine tile overlapping a corner must not win over a grid covering the whole box."""
+    box = (-90.0, -89.6, -0.65, -0.40)  # CoralCroissant 15 m covers 17 % of this box, the 50 m grids ~36 %
+    g = nr.clip("AT5009_multibeam", box)
+    assert "CoralCroissant" not in g.source and g.meta["box_coverage"] > 0.3, (g.source, g.meta)
+
+
+def test_hillshade_lit_from_northwest():
+    """Synthetic cone: the NW flank must be the brightest, SE the darkest."""
+    n = 201
+    x = -91.0 + 0.0005 * np.arange(n)
+    y = 1.0 + 0.0005 * (n - 1) - 0.0005 * np.arange(n)
+    X, Y = np.meshgrid(x, y)
+    e = (X - x[n // 2]) * 111320.0
+    nn = (Y - y[n // 2]) * 110574.0
+    z = (-2000 + 800 * np.exp(-(e ** 2 + nn ** 2) / (2 * 2000.0 ** 2))).astype(np.float32)
+    hs = nr.hillshade(nr.Grid(x, y, z, 4326, "cone"))
+    c, o = n // 2, 40
+    nw, ne, sw, se = hs[c - o, c - o], hs[c - o, c + o], hs[c + o, c - o], hs[c + o, c + o]
+    assert nw > max(ne, sw) > se, (nw, ne, sw, se)
+
+
+def test_regular_rejects_missing_column():
+    v = np.arange(100, dtype=float) * 0.0005
+    v = np.delete(v, 50)
+    with pytest.raises(ValueError):
+        nr._regular(v, "x", "synthetic")
+
+
+def test_slope_nan_at_nodata_inside_hole():
+    g = _tilted_plane(1.0)
+    g.z[60, 60] = np.nan
+    s = nr.slope_grid(g).z
+    assert np.isnan(s[60, 60])
+
+
+def test_nav_elevation_tif_is_simple(tmp_path):
+    g = nr.clip("Mittelstaedt_50m", (-91.25, -91.20, 0.65, 0.70))
+    f = nr.write_elev_tif(g, tmp_path / "e.tif", nav=True)
+    assert (tmp_path / "e.tfw").exists() and (tmp_path / "e.prj").exists()
+    with rasterio.open(f) as d:
+        assert d.nodata == nr.NAV_NODATA and d.profile.get("tiled") is False
+        assert d.profile.get("compress", "").lower() == "lzw" and np.isfinite(d.read(1)).all()

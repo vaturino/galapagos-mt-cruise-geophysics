@@ -2,10 +2,11 @@
 
 Python tooling for extracting, converting, validating, and meshing the
 datasets referenced in `DATA_MANIFEST.md`. Every script takes its
-input/output paths as command-line arguments (or resolves local imports
-relative to this folder) — nothing is hardcoded to a particular machine or
-mount point (one exception, `build_geomapapp_mosaics.py`, is called out
-below).
+input/output paths as command-line arguments or resolves paths relative to
+this repo. Exceptions: `build_geomapapp_mosaics.py` (called out below), and the
+one-off repair scripts `fix_gmrt_spikes.py`, `fix_mittelstaedt_bath_spikes.py`
+and `crop_reproject_doa_etp.py`, which have fixed repo-relative inputs/outputs
+and no options (running them with `--help` RUNS them).
 
 ## One-time setup (per machine)
 
@@ -18,8 +19,9 @@ cd scripts
 ./setup_env.sh          # Windows: setup_env.bat
 ```
 
-This creates a `venv/` folder here from the pinned versions in
-`requirements.txt`. It needs internet access once, to fetch the packages
+This creates a `venv/` folder here from `requirements.txt` (minimum versions,
+not pinned; `pip freeze` the working venv before a cruise if you need to
+reproduce it exactly). It needs internet access once, to fetch the packages
 from PyPI; every script runs fully offline after that. `venv/` is tied to
 the OS/architecture it was built on and is not committed to the repository
 — run `setup_env.sh`/`setup_env.bat` once per machine.
@@ -72,11 +74,14 @@ and `run_viewer.py` — both stdlib-only, no venv needed at all.
 
 Nothing to run. The viewer's data is already built.
 
-1. `cd Viewer3D` (or `Viewer3D_NewLayout` for the alternate layout — see its
-   own `README.md`)
-2. `python3 run_viewer.py` — opens it in your browser at `localhost`
+1. `cd Viewer3D_NewLayout` (the old `Viewer3D/` layout's launcher is no
+   longer in the repo; that folder now only holds the shared `cesium/` and
+   `data/`)
+2. `python3 run_viewer.py` — opens it in Chrome at `localhost`
+   (`--ship-feed` to show the ship's live position)
 
-Full usage: [`Viewer3D/README.md`](../Viewer3D/README.md).
+Full usage: [`Viewer3D_NewLayout/README.md`](../Viewer3D_NewLayout/README.md);
+dataset reference: [`Viewer3D/README.md`](../Viewer3D/README.md).
 
 ### Job B — I have a new/updated grid and want it importable in GeoMapApp
 
@@ -134,9 +139,11 @@ GeoMapApp will open it — see `DATA_MANIFEST.md` and
    - **Bathymetry/backscatter** → `venv/bin/python3 build_cesium_mesh.py`
    - **Geophysics** (gravity, magnetics, etc., draped over existing terrain)
      → `venv/bin/python3 build_geophysics_drape.py`
-   - Both write straight into `Viewer3D/data/` and register themselves in
-     `Viewer3D/data/manifest.json` — full flag reference in
-     [`Viewer3D/README.md`](../Viewer3D/README.md).
+   - Both write the layer folder into `Viewer3D/data/`. They do **not** add it
+     to `Viewer3D/data/manifest.json`: add an entry (`id`, `path`, `label`,
+     `category`) by hand, or the viewer won't list it. Then add the layer's
+     source to `SOURCES` in `audit_viewer_meshes.py` and run the audit. Full
+     flag reference in [`Viewer3D/README.md`](../Viewer3D/README.md).
 3. Open the viewer (Job A) and confirm the new layer shows up, at the right
    place and the right way up — cross-check against a dataset you already
    trust if anything looks off (see `Viewer3D/README.md`'s "Known
@@ -335,6 +342,9 @@ Grouped by the job it belongs to above, not alphabetically.
   — SEGY is traces along a track, not a grid, so it can't become a
   bathymetry mesh. Needs segyio.
 
-Every script supports `--help` (the older mmap-based inspector/validator
-scripts just take a list of file paths as plain arguments) — run with no
-arguments first if unsure of the exact flags.
+Scripts with options support `--help`. Not all do: the older mmap-based
+inspector/validator scripts take a plain list of file paths, and the
+one-off repair scripts (`fix_gmrt_spikes.py`, `fix_mittelstaedt_bath_spikes.py`,
+`crop_reproject_doa_etp.py`, `build_geomapapp_mosaics.py`) take no arguments at
+all and RUN when started, rewriting their outputs. Read a script's docstring
+before running it.

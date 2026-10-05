@@ -9,8 +9,13 @@ drive is plugged into).
 
 ## Opening it
 
+> **Use `Viewer3D_NewLayout/`.** This folder's own launcher and page are no longer in the
+> repo; `Viewer3D/` now only holds the shared `cesium/` library and `data/` layers, which
+> `Viewer3D_NewLayout/` uses through symlinks. This README remains the dataset and setup
+> reference.
+
 ```bash
-cd Viewer3D
+cd Viewer3D_NewLayout
 python3 run_viewer.py
 ```
 

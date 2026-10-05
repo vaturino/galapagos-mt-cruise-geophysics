@@ -16,7 +16,10 @@ Seeding rule (first guess only; review every line):
     is how far the end lies below the shallowest point on the line (so a line that crests the
     edifice and runs down the far side loses). The local upslope direction (LSQ plane within
     max(250 m, 2.5 cells)) breaks ties; the note says when the search departs from it by >20 deg;
-  - if even the best line climbs at under FLAT_DEG the row is flagged FLAT.
+  - if even the best line climbs at under FLAT_DEG the row is flagged FLAT; if it goes down more
+    than 10 m anywhere after its shallowest point it is flagged CRESTS.
+  - `refresh` marks a row "manual" when its endpoints no longer match its stored length (i.e. it
+    was edited by hand), so `seed --reseed` never overwrites it.
 
     source ~/miniforge3/etc/profile.d/conda.sh && conda activate claude-science-env
     cd Site_Maps
@@ -26,6 +29,7 @@ Seeding rule (first guess only; review every line):
 """
 import argparse
 import math
+import os
 import sys
 from pathlib import Path
 
@@ -131,12 +135,20 @@ def line_stats(lat0, lon0, lat1, lon1, g, n=101):
                 max_slope=float(np.nanmax(slope)) if np.isfinite(slope).any() else np.nan)
 
 
+def max_descent(depth):
+    """Largest descent anywhere along a profile: max over i of depth[i] - min(depth[:i+1]) (m).
+    0 for a line that only climbs; > 0 if the tow crests something and goes down again."""
+    d = np.asarray(depth, float)
+    return float(np.nanmax(d - np.fmin.accumulate(d))) if np.isfinite(d).any() else float("nan")
+
+
 def best_azimuth(g, lat, lon, length_m, az_plane, step_deg=5.0):
     """Tow direction for a line of length_m centred on the site. Scores every azimuth by
-        climb - 2 * overshoot
-    where climb = start depth - end depth and overshoot = end depth - shallowest depth along the
-    line (a line that crests the edifice and runs down the far side is penalised). The local
-    plane-fit direction wins ties, so on a clean slope the answer is just 'straight upslope'."""
+        climb - 2 * descent
+    where climb = start depth - end depth and descent = the largest drop anywhere along the line
+    after its shallowest point so far (a line that crests a ridge or the summit and runs down
+    again is penalised, wherever the crest is). The local plane-fit direction breaks ties, so on a
+    clean slope the answer is just 'straight upslope'."""
     best = None
     for az in np.arange(0, 360, step_deg):
         lo0, la0, _ = GEOD.fwd(lon, lat, (az + 180) % 360, length_m / 2)
@@ -146,7 +158,7 @@ def best_azimuth(g, lat, lon, length_m, az_plane, step_deg=5.0):
         if not np.isfinite(dep).all():
             continue
         climb = dep[0] - dep[-1]
-        overshoot = dep[-1] - dep.min()
+        overshoot = max_descent(dep)
         near_plane = abs(((az - az_plane + 180) % 360) - 180) if np.isfinite(az_plane) else 180
         score = climb - 2 * overshoot - 1e-3 * near_plane
         if best is None or score > best[0]:
@@ -179,6 +191,9 @@ def seed_line(site, lat, lon, depth_listed, length_m=LENGTH_M):
     if st["mean_slope"] < FLAT_DEG:
         note.append(f"FLAT: best line climbs only {st['depth'][0] - st['depth'][-1]:.0f} m over {st['length']:.0f} m "
                     f"({st['mean_slope']:.1f} deg); direction is weakly constrained, choose by hand")
+    drop = max_descent(st["depth"])
+    if drop > 10:
+        note.append(f"CRESTS: the line goes down {drop:.0f} m after its shallowest point (check the profile)")
     if how:
         note.append(how)
     sd = float(-sample(g, lon, lat)[0])
@@ -198,11 +213,18 @@ def recompute(row):
     mid_lon, mid_lat, _ = GEOD.fwd(lon0, lat0, GEOD.inv(lon0, lat0, lon1, lat1)[0],
                                    GEOD.inv(lon0, lat0, lon1, lat1)[2] / 2)
     bg = best_grid(mid_lat, mid_lon, require=[(lat0, lon0), (lat1, lon1)])
+    row = row.copy()
     if bg is None:
+        note = str(row.get("note", "")) if isinstance(row.get("note", ""), str) else ""
+        if "NO GRID" not in note:
+            row["note"] = (note + "; " if note else "") + "NO GRID covers this line: depths/length NOT refreshed"
         return row
     ds, cell, g = bg
     st = line_stats(lat0, lon0, lat1, lon1, g)
-    row = row.copy()
+    # endpoints edited by hand (stored length no longer matches them) -> protect from --reseed
+    old_len = row.get("length_m")
+    if not (isinstance(old_len, (int, float)) and np.isfinite(old_len) and abs(old_len - st["length"]) < 1.0):
+        row["source"] = "manual"
     row["length_m"], row["azimuth_deg"] = round(st["length"], 1), round(st["azimuth"], 1)
     row["start_depth_m"], row["end_depth_m"] = round(float(st["depth"][0]), 0), round(float(st["depth"][-1]), 0)
     row["mean_slope_deg"], row["max_slope_deg"] = round(st["mean_slope"], 1), round(st["max_slope"], 1)
@@ -218,14 +240,26 @@ def load_lines():
         for c in COLUMNS:
             if c not in df:
                 df[c] = np.nan
+        df["source"] = df["source"].astype(str).str.strip().str.lower().replace({"nan": ""})
         return df[COLUMNS]
     return pd.DataFrame(columns=COLUMNS)
+
+
+def write_lines(df):
+    """Atomic write (temp file + rename): a reader never sees a half-written CSV."""
+    df = df.copy()
+    df["site"] = df["site"].astype(float).astype(int)
+    tmp = LINES.with_name(f".{LINES.name}.tmp{os.getpid()}")
+    df.to_csv(tmp, index=False)
+    with open(tmp, "rb") as fh:
+        os.fsync(fh.fileno())
+    os.replace(tmp, LINES)
 
 
 def seed(reseed=False, length_m=LENGTH_M):
     sites = pd.read_csv(SITES)
     old = load_lines()
-    keep = old[old.source.astype(str).str.lower() == "manual"] if reseed else old
+    keep = old[old.source == "manual"] if reseed else old
     rows = [r for _, r in keep.iterrows()]
     have = set(keep.site.astype(int)) if len(keep) else set()
     for s in sites.itertuples():
@@ -237,8 +271,7 @@ def seed(reseed=False, length_m=LENGTH_M):
               f"{r.get('start_depth_m', float('nan')):5.0f} -> {r.get('end_depth_m', float('nan')):5.0f} m  "
               f"{r.get('note', '')}", flush=True)
     df = pd.DataFrame(rows)[COLUMNS].sort_values("site").reset_index(drop=True)
-    df["site"] = df.site.astype(int)
-    df.to_csv(LINES, index=False)
+    write_lines(df)
     print(f"wrote {LINES} ({len(df)} lines)")
     return df
 
@@ -254,7 +287,7 @@ if __name__ == "__main__":
     elif a.cmd == "refresh":  # recompute derived columns of every row from its endpoints
         df = load_lines()
         df = pd.DataFrame([recompute(r) if np.isfinite(r.start_lat) else r for _, r in df.iterrows()])
-        df.to_csv(LINES, index=False)
+        write_lines(df)
         print(df.to_string(index=False))
     else:
         print(load_lines().to_string(index=False))

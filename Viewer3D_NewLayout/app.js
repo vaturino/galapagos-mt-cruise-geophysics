@@ -338,6 +338,8 @@ function rebuildAllLoaded() {
   placeTrackPoints();
   placePrevDredges(true);
   if (dl.rows.length) dlDraw();
+  ship.hCache.clear();
+  if (document.getElementById("shipToggle").checked) pollShip();
   if (nativeInit.viewerIds) nativeSuggest();
   updateCrossSection();
   setLoading(false);
@@ -419,6 +421,8 @@ async function setDatasetVisible(id, visible) {
   placeTrackPoints();
   placePrevDredges(true);
   if (dl.rows.length) dlDraw();
+  ship.hCache.clear();
+  if (document.getElementById("shipToggle").checked) pollShip();
   if (nativeInit.viewerIds) nativeSuggest();
   updateCrossSection();
   // Only auto-frame when going from "nothing visible" to "something visible" --
@@ -546,6 +550,7 @@ handler.setInputAction((movement) => {
   // stray click while positioning the rectangle doesn't also drop a
   // cross-section endpoint or overwrite the pick box.
   if (state.geoExport.drawing !== "idle") return;
+  if (Date.now() - (state.geoExport.lastDragEnd || 0) < 400) return; // the click that ends a rectangle drag
   const cartesian = viewer.scene.pickPosition(movement.position);
   const box = document.getElementById("pickBox");
   if (!Cesium.defined(cartesian)) {
@@ -555,15 +560,19 @@ handler.setInputAction((movement) => {
   const carto = Cesium.Cartographic.fromCartesian(cartesian);
   const lonDeg = Cesium.Math.toDegrees(carto.longitude);
   const latDeg = Cesium.Math.toDegrees(carto.latitude);
-  const trueDepth = carto.height / state.exaggeration;
+  // the GMRT basemap is drawn BASEMAP_DEPTH_BIAS_M deeper than its data (so surveys sit on top of
+  // it); add that back when the picked surface is the basemap
+  const picked = viewer.scene.pick(movement.position);
+  const pickedDs = picked && Object.values(state.datasets).find((d) => d.primitive && d.primitive === picked.primitive);
+  const isBase = !!(pickedDs && pickedDs.meta && pickedDs.meta.colormap_stops && pickedDs.meta.colormap_stops.domain === "absolute_m");
+  const trueDepth = carto.height / state.exaggeration + (isBase ? BASEMAP_DEPTH_BIAS_M : 0); // elevation, m (negative = below sea level)
   box.textContent = `lon ${lonDeg.toFixed(5)}, lat ${latDeg.toFixed(5)}\ndepth (approx, from picked surface): ${trueDepth.toFixed(0)} m`;
 
   // Cross-section picking mode (see "Cross-section tool" below) piggybacks
   // on this same click -- the depth readout above still always happens.
-  if (state.crossSection.armed) {
-    placeCrossSectionEndpoint(cartesian);
-  }
-  if (dl.armed) dlPlacePoint(lonDeg, latDeg, trueDepth);
+  // one tool per click: a dredge line being drawn takes the click, else the cross-section
+  if (dl.armed) dlPlacePoint(lonDeg, latDeg, -trueDepth); // DredgeLines.csv depths are positive down
+  else if (state.crossSection.armed) placeCrossSectionEndpoint(cartesian);
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 // =====================================================================
@@ -811,6 +820,7 @@ function roundByte(v) {
 }
 
 function recolorDatasetForWindow(d, mode, win) {
+  if (mode === "depth" && d.sections && !d.sections.color_depth_baked) d.sections.color_depth_baked = d.sections.color_depth;
   const colorMeta = pickColorMetaFor(d, mode);
   const isRelative = !!(colorMeta.ramp && colorMeta.ramp.stops);
   const isGlobe = !!(colorMeta.ramp && colorMeta.ramp.ocean && colorMeta.ramp.land);
@@ -1336,6 +1346,31 @@ function buildTrackLegend() {
   }
 }
 
+// "-0.7029", "0.7029 S", "0 42.17 S", "0°42.172' S", "0°42'10.3\"S" -> signed decimal degrees, or NaN.
+// Hemisphere letters must match the axis (N/S for latitude, E/W for longitude).
+function parseCoord(raw, isLat) {
+  if (raw == null) return NaN;
+  let t = String(raw).trim().toUpperCase();
+  if (!t) return NaN;
+  let sign = 1;
+  const hm = t.match(/[NSEW]/g);
+  if (hm) {
+    if (hm.length > 1) return NaN;
+    const hh = hm[0];
+    if (isLat ? !"NS".includes(hh) : !"EW".includes(hh)) return NaN;
+    if (hh === "S" || hh === "W") sign = -1;
+    t = t.replace(/[NSEW]/, " ");
+  }
+  const nums = t.replace(/[°º'’"″′:]/g, " ").trim().split(/\s+/).filter(Boolean);
+  if (!nums.length || nums.length > 3 || !nums.every((x) => /^[-+]?\d+(\.\d+)?$/.test(x))) return NaN;
+  const [d, m = "0", sec = "0"] = nums;
+  if (nums.length > 1 && (+m >= 60 || +sec >= 60 || +m < 0 || +sec < 0)) return NaN;
+  let v = Math.abs(+d) + (+m) / 60 + (+sec) / 3600;
+  if (String(d).trim().startsWith("-")) sign = -sign;
+  v *= sign;
+  return Math.abs(v) <= (isLat ? 90 : 180) ? v : NaN;
+}
+
 function parseTrackCSV(text, kind) {
   const lines = text
     .split(/\r\n|\n|\r/)
@@ -1366,13 +1401,14 @@ function parseTrackCSV(text, kind) {
   }
 
   const points = [];
+  let skipped = 0;
   const unrecognisedStatuses = new Set();
   const RECOGNISED_STATUSES = new Set(["to do", "done"]);
   for (let i = startRow; i < lines.length; i++) {
     const cols = splitLine(lines[i]);
-    const lat = parseFloat(cols[latIdx]);
-    const lon = parseFloat(cols[lonIdx]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const lat = parseCoord(cols[latIdx], true);
+    const lon = parseCoord(cols[lonIdx], false);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) { skipped += 1; continue; }
     const label = labelIdx >= 0 && cols[labelIdx] ? cols[labelIdx] : `pt${points.length + 1}`;
     const siteNum = orderIdx >= 0 ? parseFloat(cols[orderIdx]) : NaN;
     const status = statusIdx >= 0 && cols[statusIdx] ? cols[statusIdx] : null;
@@ -1388,6 +1424,10 @@ function parseTrackCSV(text, kind) {
   for (const p of points) {
     p.minOrder = minOrder;
     p.maxOrder = maxOrder;
+  }
+  if (skipped > 0) {
+    const extra = `${skipped} row(s) skipped: latitude/longitude not readable (use decimal degrees, or deg min with N/S/E/W).`;
+    warning = warning ? `${warning} ${extra}` : extra;
   }
   if (unrecognisedStatuses.size > 0) {
     const extra = `Status value(s) not recognised (shown in grey, same as "done"): ${[...unrecognisedStatuses].slice(0, 4).join(", ")}${unrecognisedStatuses.size > 4 ? ", …" : ""}. Expected "to do" or "done".`;
@@ -1589,6 +1629,7 @@ function armCrossSectionPicking() {
   clearCrossSection(); // re-arming always starts a fresh pair, even mid-pick
   ensureCrossSectionCollections();
   state.crossSection.armed = true;
+  if (typeof dl !== "undefined" && dl.armed) { dl.armed = false; dl.first = null; setDlStatus("Line drawing cancelled (cross-section picking started)."); }
   setCrossSectionStatus("Click a first point on the surface for the cross-section.");
 }
 
@@ -1933,7 +1974,7 @@ function drawLayerCrossSectionCanvas(canvas, geometryProfile, layerProfile) {
   // ---- spectrum-coloured fill, one vertical band per sample ----
   const d = state.datasets[layerProfile.id];
   const colorMeta = d ? pickColorMetaFor(d, "depth") : null;
-  const canSpectrum = !!(colorMeta && colorMeta.ramp && colorMeta.ramp.stops);
+  const canSpectrum = !!(colorMeta && colorMeta.ramp && colorMeta.ramp.stops) && !(d && isSlopePalette(d));
   const win = canSpectrum ? getDepthColorWindow(d) : null;
   const winSpan = canSpectrum ? win.hi - win.lo || 1e-9 : 1;
 
@@ -2354,8 +2395,13 @@ handler.setInputAction((movement) => {
   const p = pickLonLatFromWindowPosition(movement.position);
   if (p) updateExportBBoxFromCorners(state.geoExport.corner1, p);
   state.geoExport.drawing = "idle";
+  state.geoExport.lastDragEnd = Date.now();
   restoreCameraControlsAfterDrag();
-  const b = state.geoExport.bbox;
+  let b = state.geoExport.bbox;
+  if (b && ((b.east - b.west) < 1e-4 || (b.north - b.south) < 1e-4)) { // a click, not a drag
+    state.geoExport.bbox = b = null;
+    if (state.geoExport.rectangleEntity) state.geoExport.rectangleEntity.show = false;
+  }
   setExportRegionStatus(
     b
       ? `Rectangle: ${b.west.toFixed(3)}, ${b.south.toFixed(3)} to ${b.east.toFixed(3)}, ${b.north.toFixed(3)} (lon, lat). "Export" will clip to this area; "Draw rectangle" to redo.`
@@ -2872,7 +2918,25 @@ document.getElementById("exportGeoTiffBtn").addEventListener("click", () => {
 // "Show ship position" box is ticked.
 const SHIP_POLL_MS = 60 * 1000;
 const SHIP_STALE_S = 5 * 60;
-const ship = { timer: null, entity: null, trackEntity: null, iconCache: {} };
+const SHIP_MIN_SOG_KN = 1.0; // below this, course over ground is meaningless (drifting / on station)
+const ship = { timer: null, entity: null, trackEntity: null, iconCache: {}, lastGood: 0, last: null, hCache: new Map(), gen: 0 };
+
+// Height (m, exaggerated scene units) of the displayed seafloor under a point, so the ship and its
+// lines sit on the surface the user is looking at, not at sea level above it (which shifts them by
+// kilometres in a tilted view). Cached per rounded position; cleared when the surface changes.
+function seafloorHeight(lon, lat) {
+  const key = `${lon.toFixed(4)},${lat.toFixed(4)}`;
+  if (ship.hCache.has(key)) return ship.hCache.get(key);
+  let h;
+  try { h = viewer.scene.sampleHeight(Cesium.Cartographic.fromDegrees(lon, lat)); } catch (e) { h = undefined; }
+  h = Number.isFinite(h) ? h : 0;
+  if (ship.hCache.size > 5000) ship.hCache.clear();
+  ship.hCache.set(key, h);
+  return h;
+}
+function shipPos(lon, lat) {
+  return Cesium.Cartesian3.fromDegrees(lon, lat, seafloorHeight(lon, lat) + 30 * state.exaggeration);
+}
 
 function shipIcon(stale) {
   const key = stale ? "stale" : "live";
@@ -2898,9 +2962,9 @@ function shipIcon(stale) {
 }
 
 function fmtDegMin(v, pos, neg) {
-  const a = Math.abs(v);
-  const d = Math.floor(a);
-  return `${d}°${((a - d) * 60).toFixed(3).padStart(6, "0")}' ${v >= 0 ? pos : neg}`;
+  const u = Math.round(Math.abs(v) * 60 * 1000); // thousandths of a minute: 59.9996' never prints as 60.000'
+  const d = Math.floor(u / 60000);
+  return `${d}°${((u - d * 60000) / 1000).toFixed(3).padStart(6, "0")}' ${v >= 0 ? pos : neg}`;
 }
 
 function setShipStatus(text) {
@@ -2939,7 +3003,7 @@ function setShipVector(key, deg, p, km, material) {
     return;
   }
   const [la, lo] = destinationDeg(p.lat, p.lon, deg, km);
-  const positions = [Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0), Cesium.Cartesian3.fromDegrees(lo, la, 0)];
+  const positions = [shipPos(p.lon, p.lat), shipPos(lo, la)];
   if (!ship[key]) {
     ship[key] = viewer.entities.add({ polyline: { positions, width: 3, material, depthFailMaterial: material } });
   } else {
@@ -2955,14 +3019,33 @@ function clearShip() {
   viewer.scene.requestRender();
 }
 
+// Mark what is on screen as stale (grey icon, label says so) -- used when polling fails, so a frozen
+// marker can never look live.
+function markShipStale(reason) {
+  if (!ship.entity) return;
+  const ageMin = ship.lastGood ? (Date.now() - ship.lastGood) / 60000 : NaN;
+  ship.entity.billboard.image = shipIcon(true);
+  const base = ship.last ? ship.last.split("\n")[0] : "Ship";
+  ship.entity.label.text = `${base}\nNO UPDATE for ${Number.isFinite(ageMin) ? ageMin.toFixed(0) : "?"} min (${reason}) -- STALE`;
+  ship.entity.label.fillColor = Cesium.Color.fromCssColorString("#c8d0d8");
+  viewer.scene.requestRender();
+}
+
 async function pollShip() {
+  const gen = ship.gen;
   let s;
   try {
-    s = await (await fetch("ship.json", { cache: "no-store" })).json();
+    const r = await fetch("ship.json", { cache: "no-store" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    s = await r.json();
   } catch (err) {
-    setShipStatus(`Could not reach the viewer server (${err.message}).`);
+    if (gen !== ship.gen || !document.getElementById("shipToggle").checked) return;
+    setShipStatus(`Could not reach the viewer server (${err.message}). Showing the last fix as STALE.`);
+    markShipStale(err.message);
     return;
   }
+  if (gen !== ship.gen || !document.getElementById("shipToggle").checked) return; // toggled off meanwhile
+  s.counts = s.counts || {};
   if (!s.enabled) {
     clearShip();
     setShipStatus("Ship feed is off. Start the viewer with:  python3 run_viewer.py --ship-feed");
@@ -2976,14 +3059,19 @@ async function pollShip() {
     return;
   }
   const p = s.position;
-  // a real heading (HDT/THS/HDG) younger than 5 min wins; otherwise course over ground
+  // a real heading (HDT/THS/HDG) younger than 5 min wins; otherwise course over ground, but only if it
+  // is itself fresh and the ship is actually moving (COG at < 1 kn is noise)
   const h = s.heading && s.heading.age_s <= SHIP_STALE_S ? s.heading : null;
-  const m = s.motion;
+  const mRaw = s.motion;
+  const m = mRaw && mRaw.age_s <= SHIP_STALE_S && mRaw.sog_kn != null && mRaw.sog_kn >= SHIP_MIN_SOG_KN ? mRaw : null;
   const stale = p.age_s > SHIP_STALE_S;
-  const where = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0);
-  const sogTxt = m && m.sog_kn != null ? `, ${m.sog_kn.toFixed(1)} kn` : "";
-  const hdgTxt = h ? `heading ${h.deg.toFixed(1)}° ${h.true ? "T" : "M"}${sogTxt}`
-    : m ? `COG ${m.cog.toFixed(1)}° T${sogTxt} (no heading feed)` : "heading n/a";
+  ship.lastGood = Date.now();
+  const where = shipPos(p.lon, p.lat);
+  const sogTxt = mRaw && mRaw.sog_kn != null && mRaw.age_s <= SHIP_STALE_S ? `, ${mRaw.sog_kn.toFixed(1)} kn` : "";
+  const why = s.heading ? "heading stale" : "no heading feed";
+  const hdgTxt = h ? `heading ${h.deg.toFixed(1)}° ${h.true ? "T" : "M (magnetic, not corrected)"}${sogTxt}`
+    : m ? `COG ${m.cog.toFixed(1)}° T${sogTxt} (${why})`
+      : `direction unknown (${why}${mRaw ? "; speed < 1 kn or COG stale" : ""})${sogTxt}`;
   const label = `Ship  ${fmtDegMin(p.lat, "N", "S")}  ${fmtDegMin(p.lon, "E", "W")}\n${hdgTxt}   fix ${Math.round(p.age_s)} s old${stale ? " (STALE)" : ""}`;
   if (!ship.entity) {
     ship.entity = viewer.entities.add({
@@ -3009,7 +3097,9 @@ async function pollShip() {
     });
   }
   ship.entity.position = where;
-  ship.entity.billboard.image = shipIcon(stale);
+  ship.entity.billboard.image = shipIcon(stale || dirIsNull(h, m));
+  ship.entity.label.fillColor = stale ? Cesium.Color.fromCssColorString("#c8d0d8") : Cesium.Color.WHITE;
+  ship.last = label;
   // Cesium billboard rotation is counter-clockwise in radians; heading is clockwise from north
   const dirDeg = h ? h.deg : m ? m.cog : null;
   ship.entity.billboard.rotation = dirDeg != null ? -Cesium.Math.toRadians(dirDeg) : 0;
@@ -3020,7 +3110,7 @@ async function pollShip() {
   setShipVector("hdgEntity", h ? h.deg : null, p, aheadKm, new Cesium.ColorMaterialProperty(Cesium.Color.fromCssColorString("#ff2d6f")));
   setShipVector("cogEntity", m ? m.cog : null, p, aheadKm,
     new Cesium.PolylineDashMaterialProperty({ color: Cesium.Color.WHITE, dashLength: 12 }));
-  const pts =(s.track || []).map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, 0));
+  const pts = (s.track || []).map(([lon, lat]) => shipPos(lon, lat));
   if (pts.length >= 2) {
     if (!ship.trackEntity) {
       ship.trackEntity = viewer.entities.add({
@@ -3033,14 +3123,20 @@ async function pollShip() {
   }
   renderSoon();
   setShipStatus(`Fix from ${p.sentence}${p.utc ? " at " + p.utc + " UTC" : ""}, ${Math.round(p.age_s)} s old` +
-    (h ? `; heading from ${h.sentence}` : m ? `; no heading feed, arrow = course over ground (${m.sentence})` : "; no heading received") +
+    (h ? `; heading from ${h.sentence}` : m ? `; ${why}, arrow = course over ground (${m.sentence})`
+      : `; ${why}, no usable course: arrow shown grey, pointing north`) +
     `. Lines show 30 min ahead (${aheadKm.toFixed(1)} km): solid pink = heading, dashed white = course over ground.` +
     ` Track: ${(s.track || []).length} pts (1/min). Next update in 1 min.`);
+}
+
+function dirIsNull(h, m) {
+  return !h && !m;
 }
 
 document.getElementById("shipToggle").addEventListener("change", (e) => {
   if (ship.timer) clearInterval(ship.timer);
   ship.timer = null;
+  ship.gen += 1; // any poll still in flight is now ignored
   if (e.target.checked) {
     setShipStatus("Checking for the ship feed...");
     pollShip();
@@ -3085,6 +3181,7 @@ const prev = {
 
 // quote-aware CSV (descriptions contain commas)
 function parseCsvRows(text) {
+  text = text.replace(/^\uFEFF/, "");
   const rows = [];
   let row = [], cell = "", q = false;
   for (let i = 0; i < text.length; i++) {
@@ -3450,7 +3547,7 @@ function dlGeodesic(lat0, lon0, lat1, lon1) {
 }
 
 function dlPlacePoint(lon, lat, depth) {
-  const r = dlSelected();
+  const r = dl.rows.find((x) => String(x.site) === String(dl.site)); // the site chosen when Draw was pressed
   if (!r) { dl.armed = false; return; }
   if (!dl.first) {
     dl.first = { lon, lat, depth };
@@ -3458,6 +3555,10 @@ function dlPlacePoint(lon, lat, depth) {
     return;
   }
   const s = dl.first, g = dlGeodesic(s.lat, s.lon, lat, lon);
+  if (!(g.length >= 20)) {
+    setDlStatus(`D${r.site}: end is only ${g.length.toFixed(0)} m from the start -- click the END somewhere else.`);
+    return;
+  }
   Object.assign(r, {
     start_lat: s.lat.toFixed(6), start_lon: s.lon.toFixed(6), end_lat: lat.toFixed(6), end_lon: lon.toFixed(6),
     length_m: g.length.toFixed(1), azimuth_deg: g.azimuth.toFixed(1), start_depth_m: Math.round(s.depth),
@@ -3487,22 +3588,24 @@ function dlDownload(name, text, type) {
 
 const xmlEsc = (s) => String(s).replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" }[c]));
 
+const dlTag = (site) => `D${String(site).padStart(2, "0")}`;
+
 function dlGpx() {
   const pts = (r) => [["S", r.start_lat, r.start_lon, r.start_depth_m], ["E", r.end_lat, r.end_lon, r.end_depth_m]];
   return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="AT53-04 viewer" xmlns="http://www.topografix.com/GPX/1/1">\n` +
-    dl.rows.map((r) => pts(r).map(([k, la, lo, d]) => `<wpt lat="${la}" lon="${lo}"><name>D${r.site}-${k}</name><desc>${k === "S" ? "start" : "end"} of tow, ${d} m</desc></wpt>`).join("\n")).join("\n") + "\n" +
-    dl.rows.map((r) => `<rte><name>D${r.site}</name><desc>${xmlEsc(`${r.length_m} m at ${r.azimuth_deg} deg, ${r.start_depth_m}->${r.end_depth_m} m. ${r.note || ""}`)}</desc>` +
-      pts(r).map(([k, la, lo, d]) => `<rtept lat="${la}" lon="${lo}"><name>D${r.site}-${k}</name></rtept>`).join("") + "</rte>").join("\n") +
+    dl.rows.map((r) => pts(r).map(([k, la, lo, d]) => `<wpt lat="${la}" lon="${lo}"><name>${dlTag(r.site)}${k}</name><desc>${k === "S" ? "start" : "end"} of tow, ${d} m</desc></wpt>`).join("\n")).join("\n") + "\n" +
+    dl.rows.map((r) => `<rte><name>${dlTag(r.site)}</name><desc>${xmlEsc(`${r.length_m} m at ${r.azimuth_deg} deg, ${r.start_depth_m}->${r.end_depth_m} m. ${r.note || ""}`)}</desc>` +
+      pts(r).map(([k, la, lo, d]) => `<rtept lat="${la}" lon="${lo}"><name>${dlTag(r.site)}${k}</name></rtept>`).join("") + "</rte>").join("\n") +
     "\n</gpx>\n";
 }
 
 function dlKml() {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>AT53-04 dredge lines</name>\n` +
-    `<Style id="l"><LineStyle><color>ff1a8cff</color><width>4</width></LineStyle></Style>\n` +
-    dl.rows.map((r) => `<Placemark><name>D${r.site}</name><description>${xmlEsc(`${r.length_m} m at ${r.azimuth_deg} deg, ${r.start_depth_m}->${r.end_depth_m} m (${r.source}). ${r.note || ""}`)}</description>` +
+    `<Style id="l"><LineStyle><color>ff6f2dff</color><width>4</width></LineStyle></Style>\n` +
+    dl.rows.map((r) => `<Placemark><name>${dlTag(r.site)}</name><description>${xmlEsc(`${r.length_m} m at ${r.azimuth_deg} deg, ${r.start_depth_m}->${r.end_depth_m} m (${r.source}). ${r.note || ""}`)}</description>` +
       `<styleUrl>#l</styleUrl><LineString><coordinates>${r.start_lon},${r.start_lat},0 ${r.end_lon},${r.end_lat},0</coordinates></LineString></Placemark>\n` +
-      `<Placemark><name>D${r.site} start</name><Point><coordinates>${r.start_lon},${r.start_lat},0</coordinates></Point></Placemark>\n` +
-      `<Placemark><name>D${r.site} end</name><Point><coordinates>${r.end_lon},${r.end_lat},0</coordinates></Point></Placemark>`).join("\n") +
+      `<Placemark><name>${dlTag(r.site)}S</name><Point><coordinates>${r.start_lon},${r.start_lat},0</coordinates></Point></Placemark>\n` +
+      `<Placemark><name>${dlTag(r.site)}E</name><Point><coordinates>${r.end_lon},${r.end_lat},0</coordinates></Point></Placemark>`).join("\n") +
     "\n</Document></kml>\n";
 }
 
@@ -3519,6 +3622,8 @@ document.getElementById("dlDrawBtn").addEventListener("click", () => {
   if (!r) { setDlStatus("Tick the layer and pick a site first."); return; }
   dl.armed = true;
   dl.first = null;
+  dl.site = r.site;
+  if (state.crossSection.armed) { state.crossSection.armed = false; setCrossSectionStatus("Cross-section picking cancelled (drawing a dredge line)."); }
   setDlStatus(`D${r.site}: click the START of the tow on the surface (deep end, usually), then the END.`);
 });
 document.getElementById("dlReverseBtn").addEventListener("click", () => {
@@ -3527,14 +3632,18 @@ document.getElementById("dlReverseBtn").addEventListener("click", () => {
   [r.start_lat, r.end_lat] = [r.end_lat, r.start_lat];
   [r.start_lon, r.end_lon] = [r.end_lon, r.start_lon];
   [r.start_depth_m, r.end_depth_m] = [r.end_depth_m, r.start_depth_m];
-  r.azimuth_deg = ((dlNum(r.azimuth_deg) + 180) % 360).toFixed(1);
+  const gr = dlGeodesic(dlNum(r.start_lat), dlNum(r.start_lon), dlNum(r.end_lat), dlNum(r.end_lon));
+  r.azimuth_deg = Number.isFinite(gr.azimuth) ? gr.azimuth.toFixed(1) : "";
   r.source = "manual";
   dl.dirty = true;
   setDlStatus(`D${r.site} reversed. Not saved yet.`);
   dlDraw();
   dlList();
 });
-document.getElementById("dlSaveBtn").addEventListener("click", async () => {
+document.getElementById("dlSaveBtn").addEventListener("click", async (ev) => {
+  const btn = ev.currentTarget;
+  if (btn.disabled) return;
+  btn.disabled = true; // one save at a time (the server also serialises saves)
   setDlStatus("Saving and recomputing depths from the grids...");
   try {
     const r = await fetch("sites/DredgeLines.csv", { method: "POST", body: dlCsv(), headers: { "Content-Type": "text/csv" } });
@@ -3545,6 +3654,8 @@ document.getElementById("dlSaveBtn").addEventListener("click", async () => {
     setDlStatus(`MT_dredging_coords/DredgeLines.csv ${r.headers.get("X-Save-Note") || "saved"}.`);
   } catch (err) {
     setDlStatus(`Not saved: ${err.message}`);
+  } finally {
+    btn.disabled = false;
   }
 });
 document.getElementById("dlCsvBtn").addEventListener("click", () => dlDownload("DredgeLines.csv", dlCsv(), "text/csv"));
@@ -3570,6 +3681,7 @@ async function nativeInit() {
 
 // default the dropdown to the finest checked layer that has a native source
 function nativeSuggest() {
+  if (nativeSuggest.userChose) return; // never override what the user picked
   const ids = nativeInit.viewerIds || {};
   const vis = state.order.filter((id) => state.datasets[id].visible && ids[id]);
   if (!vis.length) return;
@@ -3581,7 +3693,7 @@ function nativeSuggest() {
 // viewer palette key -> matplotlib/cmocean/cmcrameri name with the same orientation
 // (endpoints checked: viewer stop t=0 == colormap(0))
 const PALETTE_TO_CMAP = { deep: "cmo.deep_r", haline: "cmo.haline", ice: "cmo.ice", dense: "cmo.dense_r", oslo: "cmc.oslo",
-  batlow: "cmc.batlow", viridis: "viridis", cividis: "cividis", turbo: "turbo", spectral: "Spectral", greys: "gray", slope: "YlOrRd" };
+  batlow: "cmc.batlow", viridis: "viridis", cividis: "cividis", turbo: "turbo", spectral: "Spectral", greys: "Greys_r", slope: "YlOrRd" };
 
 // the colour map chosen in the legend for a viewer layer that shows this native dataset (if any)
 function nativeCmapFor(ds) {
@@ -3595,6 +3707,8 @@ function nativeCmapFor(ds) {
   return { cmap: name, slope: isSlopePalette(d), from: vid };
 }
 
+document.getElementById("nativeDs").addEventListener("change", () => { nativeSuggest.userChose = true; });
+
 document.getElementById("nativeExportBtn").addEventListener("click", async () => {
   const st = document.getElementById("nativeStatus");
   const ds = document.getElementById("nativeDs").value;
@@ -3607,6 +3721,11 @@ document.getElementById("nativeExportBtn").addEventListener("click", async () =>
     b = { west: Cesium.Math.toDegrees(r.west), east: Cesium.Math.toDegrees(r.east),
           south: Cesium.Math.toDegrees(r.south), north: Cesium.Math.toDegrees(r.north) };
     what = "current view";
+  }
+  if (b.east - b.west > 2 || b.north - b.south > 2 || !(b.east > b.west)) {
+    st.textContent = `The ${what} is ${(b.east - b.west).toFixed(2)} x ${(b.north - b.south).toFixed(2)} deg; the limit is 2 deg on a side. ` +
+      "Zoom in, or use Select region + Draw rectangle. Whole datasets are already in Native_Maps/.";
+    return;
   }
   const pal = nativeCmapFor(ds);
   const q = new URLSearchParams({ ds, w: b.west.toFixed(6), e: b.east.toFixed(6), s: b.south.toFixed(6), n: b.north.toFixed(6),
