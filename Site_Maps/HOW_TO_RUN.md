@@ -22,6 +22,8 @@ python make_site_maps.py            # ~16 s  site maps + coordinate tables
 python compare_dredge_lists.py      # ~2 s   permit vs 29-Sep comparison
 python make_previous_dredge_maps.py # ~14 s  previous-dredge maps, zooms, MV1007
 python make_repeat_site_map.py      # ~4 s   D7/D25/D26 repeat-site map
+python dredge_plan.py seed          # ~10 s  planned tow per site (only adds missing lines)
+python make_dredge_packets.py       # ~2 min one data packet per dredge -> ../Dredge_Packets/
 ```
 
 Run them in this order. The later scripts import helpers from
@@ -34,6 +36,8 @@ Then copy the results into this Permits folder (step 5).
 
 | Script | Outputs (written next to the script, in `Site_Maps/`) |
 |---|---|
+| `dredge_plan.py seed` / `refresh` / `show` | `MT_dredging_coords/DredgeLines.csv`: one planned tow per dredge site. `seed` adds an auto line (1 km through the site, the azimuth that climbs most without cresting the edifice) for every site without one, and never touches hand-edited lines. `--reseed` regenerates the auto lines; `--length 1500` changes the length. `refresh` recomputes lengths, depths and slopes after editing the endpoints by hand. |
+| `make_dredge_packets.py` | `../Dredge_Packets/`: per site, a 2-page sheet (planning map, along-tow profile with slope, across-tow profile, coordinate table, flags; then a slope map), waypoints (CSV/GPX/KML), a profile CSV, and native-resolution GeoTIFF clips (elevation, colour for the nav system, slope, backscatter). Plus all-site GPX/KML/CSV and a combined PDF. Every folder has a README explaining each plot. Options: `--sites 7 25`, `--slope-baseline 200`, `--bathy-cmap cmo.topo`, `--slope-cmap magma_r`. |
 | `make_site_maps.py` | `Dredge_Sites_Map`, `MT_Sites_Map`, `Combined_Sites_Map`, plus a `_Reserves_Map` version of each (`.png` + `.pdf`; the PDFs add coordinate-table pages). Also `Dredge_Sites_Table.csv`, `MT_Sites_Table.csv` and `AT5304_Site_Coordinates.xlsx`. |
 | `compare_dredge_lists.py` | `Dredge_Permit_vs_Sep29_Comparison.png` / `.csv` |
 | `make_previous_dredge_maps.py` | `Permit_Dredges_with_Previous_Map`, `Dredge_Glass_Status_Map`, `Dredge_Zoom_A`-`D` (+ `Dredge_Zooms_All.pdf`), `MV1007_Dredges_Map`, `Previous_Dredges_Regional_Map`. Also `Previous_Dredges_Compiled.csv` and `Permit_Sites_Nearest_Previous.csv`. |
@@ -112,7 +116,8 @@ cp *.png *.pdf Dredge_Permit_vs_Sep29_Comparison.csv "$T/2_Maps/"
 cp Dredge_Sites_Table.csv MT_Sites_Table.csv AT5304_Site_Coordinates.xlsx Previous_Dredges_Compiled.csv Permit_Sites_Nearest_Previous.csv Repeat_Dredge_Sites.csv "$T/1_Coordinates/"
 cp *.py "$T/4_Scripts/" && cp -r reserves "$T/4_Scripts/" && cp README.md "$T/4_Scripts/Site_Maps_README.md"
 cp Repeat_Dredge_Sites_NOTE.md "$T/"
-cp ../MT_dredging_coords/DredgeSites.* ../MT_dredging_coords/MTsites.* "$T/3_Site_Files/"
+cp ../MT_dredging_coords/DredgeSites.* ../MT_dredging_coords/MTsites.* ../MT_dredging_coords/DredgeLines.csv "$T/3_Site_Files/"
+rsync -a --delete ../Dredge_Packets/ "$T/5_Dredge_Packets/"
 ```
 
 ## 6. Common changes
@@ -132,6 +137,12 @@ cp ../MT_dredging_coords/DredgeSites.* ../MT_dredging_coords/MTsites.* "$T/3_Sit
   `make_repeat_site_map.py`.
 - **Depth-flag threshold:** `DEPTH_FLAG_M = 300` at the top of
   `make_site_maps.py`.
+- **Edit a dredge line:** in the 3D viewer (Dredge lines: pick the site,
+  **Draw line**, click start then end, **Save to repo**). Or edit
+  `DredgeLines.csv` (set `source` to `manual`) and run
+  `python dredge_plan.py refresh`. Then rerun `make_dredge_packets.py`.
+- **Seed-line rules:** `LENGTH_M = 1000` and `FLAT_DEG = 3` at the top of
+  `dredge_plan.py`.
 
 ## 7. Committing and notes
 

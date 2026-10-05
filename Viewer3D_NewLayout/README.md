@@ -205,3 +205,64 @@ behind the ship is its track, one point per minute.
   they're built. Before, they only appeared after the next camera move.
 - `run_viewer.py` no longer drops the connection on a 404. The log filter
   assumed a string and crashed on the error code.
+
+### Dredge lines, native-resolution GeoTIFF export, slope colouring (2026-10-04)
+
+**Dredge lines (planning).** Tick "Dredge lines (planning)". The layer shows
+`MT_dredging_coords/DredgeLines.csv`, one planned on-bottom tow per permit
+site, drawn as an arrow from start (green) to end (red) with a label giving
+depths, length and bearing.
+- **Line colours:** orange = auto first guess, yellow = auto but flat
+  (direction weakly constrained), magenta = drawn or edited by hand.
+- **Draw line:** pick a site, then click the start and the end on the
+  surface. Length and bearing are geodesic on WGS-84 (Cesium
+  `EllipsoidGeodesic`; the server's pyproj recomputation agrees to 0.1 m and
+  0.1°).
+- **Reverse:** swaps start and end.
+- **Save to repo:** POSTs the CSV to `run_viewer.py`, which keeps the old
+  file in `MT_dredging_coords/backups/`, writes the new one, and runs
+  `Site_Maps/dredge_plan.py refresh` to recompute depths and slopes from the
+  finest grid.
+- **CSV / GPX / KML:** download the current lines; GPX has routes `DnnS -> DnnE`.
+- **Seeds:** `Site_Maps/dredge_plan.py seed`. For the per-dredge packets
+  (sheets, waypoints, nav GeoTIFFs), run `Site_Maps/make_dredge_packets.py`.
+
+**Native-resolution GeoTIFF (Export panel).** Pick a dataset, then export
+the selected region (or the current view). `run_viewer.py /export_native`
+runs `scripts/native_render.py clip`, which cuts the box straight out of the
+original grid file: 1 pixel = 1 grid cell, the grid's own CRS, no
+resampling. The download is a zip containing:
+- elevation (float32)
+- a colour GeoTIFF
+- slope (degrees, float32, plus a colour version)
+- a map PNG and an info JSON
+
+Notes:
+- "Navigation-safe" (default) writes classic strip TIFFs (LZW, RGB, no
+  alpha, no BigTIFF) with `.tfw` and `.prj` files, the most widely readable
+  form for chart and navigation software.
+- If you picked a colour map for that layer in the legend, the colour
+  GeoTIFF uses the same map (viewer palette names map to cmocean,
+  cmcrameri and matplotlib names with matching orientation).
+- The export needs a Python with numpy, rasterio and pyproj. The server
+  defaults to `~/miniforge3/envs/claude-science-env/bin/python`; override
+  with `--python`.
+- The old "Export visible layers as GeoTIFF" button is unchanged. It
+  rasterises the displayed (possibly decimated) meshes.
+
+**Slope colouring.** Each layer's colour-map menu now has "SLOPE (deg) from
+the mesh".
+- **How it's computed:** slope = acos(|n · up|) per vertex, from the mesh
+  normals (built from the true, unexaggerated surface), shown on a fixed
+  0–40° YlOrRd scale with the usual drag handles.
+- **Scale:** vertex normals average the neighbouring triangles, so this is
+  the slope over about two cells of the displayed mesh. Checked on the
+  stride-2 Mittelstaedt layer (100 m vertices): against
+  `native_render.slope_grid` over 200 m, r = 0.990 and median |difference|
+  = 0.09° (3000 random vertices); over 100 m or 400 m the agreement is
+  worse (r = 0.91, 0.95).
+- **Finer slopes:** load the 50 m tiles for slope over about 100 m, or use
+  the native export, which uses the source grid itself.
+
+**Fixed:** a box outside a grid's coverage now returns "no data in that
+box" instead of failing.

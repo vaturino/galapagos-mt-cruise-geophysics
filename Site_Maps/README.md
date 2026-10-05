@@ -16,6 +16,8 @@ site numbered in planned order.
 | `Repeat_Dredge_Sites_Map.png` / `.pdf`, `Repeat_Dredge_Sites.csv`, `Repeat_Dredge_Sites_NOTE.md` | D7, D25 and D26 are within 1 km of MV1007 dredges that recovered no glass or no rock. Decide before the cruise. Made by `make_repeat_site_map.py`. |
 | `Previous_Dredges_Compiled.csv`, `Permit_Sites_Nearest_Previous.csv` | Every previous dredge station (104), and each permit site's nearest previous dredge and nearest glass-bearing one. |
 | `make_site_maps.py`, `compare_dredge_lists.py`, `make_previous_dredge_maps.py`, `make_repeat_site_map.py` | Regenerate everything above. `make_previous_dredge_maps.py` reads the previous-dredge spreadsheets from `Work_AI/Permits/9_AT5304_Final_Sites_and_Maps/4_prev_dredges/` (path at the top of the script). |
+| `dredge_plan.py` | Planned tows: writes/updates `MT_dredging_coords/DredgeLines.csv` (one line per site: start/end, length, azimuth, depths, slopes, grid used, flags). See `HOW_TO_RUN.md`. |
+| `make_dredge_packets.py` | One data packet per planned dredge in `../Dredge_Packets/` (sheet + slope map, waypoints GPX/KML/CSV, profile CSV, native-resolution GeoTIFF clips for the navigation system). Each folder has a README explaining the plots and parameters. |
 | `reserves/` | DPNG shapefiles of the Galapagos (RMG) and Hermandad (RMH) marine reserves, copied from `Work_AI/Permits/5_Sites_permits/Codes/Locations/`. |
 
 **Source of the sites:** `MT_dredging_coords/DredgeSites.csv` and

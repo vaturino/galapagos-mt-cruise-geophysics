@@ -300,6 +300,34 @@ Grouped by the job it belongs to above, not alphabetically.
   dataset needs its source added to `SOURCES` at the top. Needs numpy
   (plus rasterio for GeoTIFF/NetCDF4 sources).
 
+### Native-resolution maps, GeoTIFF exports and slope
+- **`native_render.py`** — every gridded dataset in the repo, rendered or
+  cut out at its native resolution: 1 output pixel = 1 source cell, in the
+  source's own CRS (no downsampling, no reprojection).
+  - **Registry:** `DATASETS` at the top names 24 datasets (81 files). It
+    holds the finest version of each and deliberately skips the resampled
+    `GeoMapApp_ready/GMRT_regional/*_mosaic.grd` copies. For example,
+    TN188 there is 40.8 m but 7 m here, and AT50-09 is 49.6 m vs 15-30 m.
+  - **Reads:** GeoTIFF, classic and NetCDF-4 GMT grids (old-style
+    `x_range` too), ESRI ASCII, and 0-360 longitudes.
+  - **Writes:** float32 value GeoTIFFs, RGB GeoTIFFs (`--nav`: classic
+    strip TIFF + `.tfw`/`.prj` for ship navigation software), a pixel-exact
+    annotated PNG and an info JSON. For bathymetry it also writes seafloor
+    slope (degrees; central differences over `--baseline` metres, default
+    2 cells).
+  - **Commands:** `all`, `one`, `clip <dataset> W E S N`, `slope`,
+    `readme`, `list [--json]`.
+  - **Used by:** the 3D viewer's "Native-resolution GeoTIFF" export and
+    `Site_Maps/make_dredge_packets.py`.
+  - **Environment:** `claude-science-env` (rasterio, pyproj, cmocean,
+    matplotlib).
+  - **Tests:** `python -m pytest tests/test_native_render.py`, 19 tests:
+    - exact value and cell-centre round trips for each input format
+    - orientation against independent grids
+    - a tilted plane at 1°N and 60°N, and in Mercator
+    - the central-difference transfer function for several baselines
+    - checks that fail on a one-cell shift or a missing cos(lat).
+
 ### Other formats
 - **`segy_inspect.py`** — reads a SEGY seismic file's headers (trace count,
   sample rate, record length, shot-point coordinate range) without loading

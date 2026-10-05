@@ -225,7 +225,98 @@ SITE_FILES = {
     "Previous_Dredges_Compiled.csv": "Site_Maps/Previous_Dredges_Compiled.csv",
     "DredgeSites.csv": "MT_dredging_coords/DredgeSites.csv",
     "MTsites.csv": "MT_dredging_coords/MTsites.csv",
+    "DredgeLines.csv": "MT_dredging_coords/DredgeLines.csv",
 }
+WRITABLE = {"DredgeLines.csv"}  # the viewer may save these (old copy kept in MT_dredging_coords/backups/)
+LINE_COLUMNS = ("site", "start_lat", "start_lon", "end_lat", "end_lon")
+
+# Python with numpy/rasterio/pyproj, for the native-resolution export and line refresh
+# (this server itself is stdlib-only). Override with --python.
+SCIENCE_PY = next((p for p in (Path.home() / "miniforge3/envs/claude-science-env/bin/python",) if p.exists()),
+                  Path(sys.executable))
+
+
+def _send(handler, code, body, ctype, extra=None):
+    handler.send_response(code)
+    handler.send_header("Content-Type", ctype)
+    handler.send_header("Content-Length", str(len(body)))
+    for k, v in (extra or {}).items():
+        handler.send_header(k, v)
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
+def save_lines(body):
+    """Validate and save a DredgeLines.csv posted by the viewer, keep a timestamped backup,
+    then recompute the derived columns (lengths, depths, slopes) from the grids."""
+    import csv
+    import io
+    import shutil
+    import subprocess
+    rows = list(csv.DictReader(io.StringIO(body.decode("utf-8"))))
+    if not rows or any(c not in rows[0] for c in LINE_COLUMNS):
+        raise ValueError(f"need columns {', '.join(LINE_COLUMNS)}")
+    for r in rows:
+        float(r["start_lat"]), float(r["start_lon"]), float(r["end_lat"]), float(r["end_lon"]), int(r["site"])
+    dst = REPO / SITE_FILES["DredgeLines.csv"]
+    if dst.exists():
+        bdir = dst.parent / "backups"
+        bdir.mkdir(exist_ok=True)
+        shutil.copy2(dst, bdir / f"DredgeLines_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+    dst.write_bytes(body)
+    r = subprocess.run([str(SCIENCE_PY), "-W", "ignore", "dredge_plan.py", "refresh"], cwd=REPO / "Site_Maps",
+                       capture_output=True, text=True, timeout=300)
+    note = "saved; depths/slopes recomputed" if r.returncode == 0 else \
+        f"saved, but depth refresh failed ({(r.stderr or r.stdout).strip().splitlines()[-1:]})"
+    return dst.read_bytes(), note
+
+
+_native_list = None
+
+
+def native_datasets():
+    """Registry of exportable datasets (scripts/native_render.py list --json), cached."""
+    global _native_list
+    if _native_list is None:
+        import subprocess
+        r = subprocess.run([str(SCIENCE_PY), "-W", "ignore", "native_render.py", "list", "--json"],
+                           cwd=REPO / "scripts", capture_output=True, text=True, timeout=120)
+        if r.returncode != 0:
+            raise RuntimeError(f"{SCIENCE_PY} could not run native_render.py (needs numpy/rasterio/pyproj): "
+                               + (r.stderr.strip().splitlines() or ["?"])[-1])
+        _native_list = r.stdout.encode()
+    return _native_list
+
+
+def export_native(q):
+    """Native-resolution clip of one dataset over a lon/lat box -> zip bytes (GeoTIFFs + PNG + info)."""
+    import subprocess
+    import tempfile
+    import zipfile
+    sys.path.insert(0, str(REPO / "scripts"))
+    ds = q["ds"]
+    w, e, s, n = (float(q[k]) for k in ("w", "e", "s", "n"))
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", q.get("name") or f"{ds}_{s:.3f}_{n:.3f}_{w:.3f}_{e:.3f}")
+    with tempfile.TemporaryDirectory() as tmp:
+        cmd = [str(SCIENCE_PY), "-W", "ignore", "native_render.py", "clip", ds, str(w), str(e), str(s), str(n),
+               "--out", tmp, "--name", name]
+        if q.get("nav") == "1":
+            cmd.append("--nav")
+        if q.get("wgs84") == "1":
+            cmd.append("--wgs84")
+        if q.get("slope") == "1":
+            cmd.append("--slope")
+        if q.get("cmap") and re.fullmatch(r"[A-Za-z0-9_.]+", q["cmap"]):
+            cmd += ["--cmap", q["cmap"]]
+        r = subprocess.run(cmd, cwd=REPO / "scripts", capture_output=True, text=True, timeout=1800)
+        if r.returncode != 0:
+            raise RuntimeError((r.stderr or r.stdout).strip().splitlines()[-1] if (r.stderr or r.stdout) else "failed")
+        buf = Path(tmp) / "out.zip"
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in sorted(Path(tmp).iterdir()):
+                if f.name != "out.zip":
+                    z.write(f, f"{name}/{f.name}")
+        return buf.read_bytes(), name
 
 
 class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
@@ -252,6 +343,24 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if name == "/native_datasets":
+            try:
+                body = native_datasets()
+            except Exception as err:
+                _send(self, 500, json.dumps({"error": str(err)}).encode(), "application/json")
+                return
+            _send(self, 200, body, "application/json")
+            return
+        if name == "/export_native":
+            from urllib.parse import parse_qsl
+            q = dict(parse_qsl(self.path.partition("?")[2]))
+            try:
+                body, fname = export_native(q)
+            except Exception as err:  # report to the page rather than dropping the connection
+                _send(self, 400, f"export failed: {err}".encode(), "text/plain; charset=utf-8")
+                return
+            _send(self, 200, body, "application/zip", {"Content-Disposition": f'attachment; filename="{fname}.zip"'})
+            return
         if name == "/ship.json":
             snap = self.ship.snapshot(self.ship_enabled) if self.ship else {"enabled": False}
             body = json.dumps(snap).encode()
@@ -263,8 +372,22 @@ class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
             return
         super().do_GET()
 
+    def do_POST(self):
+        name = self.path.split("?")[0]
+        if not (name.startswith("/sites/") and name[7:] in WRITABLE):
+            _send(self, 403, b"not writable", "text/plain")
+            return
+        body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        try:
+            saved, note = save_lines(body)
+        except Exception as err:
+            _send(self, 400, f"not saved: {err}".encode(), "text/plain; charset=utf-8")
+            return
+        _send(self, 200, saved, "text/csv; charset=utf-8", {"X-Save-Note": note})
+
     def log_message(self, fmt, *args):
-        if "/ship.json" not in (str(args[0]) if args else ""):  # args[0] is an HTTPStatus for errors  # don't log the once-a-minute poll
+        # don't log the once-a-minute ship poll; args[0] is an HTTPStatus (not a str) for errors
+        if "/ship.json" not in (str(args[0]) if args else ""):
             super().log_message(fmt, *args)
 
     def send_head(self):
@@ -304,6 +427,7 @@ def find_free_port(preferred):
 
 
 def main():
+    global SCIENCE_PY
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=0, help="port to serve on (default: pick a free one)")
     ap.add_argument("--no-browser", action="store_true", help="don't auto-open a browser tab")
@@ -311,7 +435,11 @@ def main():
                     help="listen for the ship's GPS and heading on UDP and show them in the viewer")
     ap.add_argument("--gps-port", type=int, default=55000, help="UDP port of the GPS feed (default 55000)")
     ap.add_argument("--heading-port", type=int, default=55001, help="UDP port of the heading feed (default 55001)")
+    ap.add_argument("--python", default=None,
+                    help=f"python with numpy/rasterio/pyproj for native GeoTIFF export (default {SCIENCE_PY})")
     args = ap.parse_args()
+    if args.python:
+        SCIENCE_PY = Path(args.python)
 
     NoCacheHandler.ship = ShipState()
     NoCacheHandler.ship_enabled = args.ship_feed

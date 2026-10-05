@@ -111,6 +111,27 @@
     </div>
 
     <div class="control-group">
+      <label><input type="checkbox" id="dlToggle"> Dredge lines (planning)</label>
+      <div class="radio-row">
+        <label>Site <select id="dlSite"></select></label>
+      </div>
+      <div class="track-buttons cross-section-buttons">
+        <button id="dlDrawBtn">Draw line</button>
+        <button id="dlReverseBtn">Reverse</button>
+        <button id="dlFlyBtn">Go to</button>
+      </div>
+      <div class="track-buttons cross-section-buttons">
+        <button id="dlSaveBtn">Save to repo</button>
+        <button id="dlCsvBtn">CSV</button>
+        <button id="dlGpxBtn">GPX</button>
+        <button id="dlKmlBtn">KML</button>
+      </div>
+      <div id="dlStatus" class="hint-text"></div>
+      <div id="dlList" class="dl-list"></div>
+      <div class="hint-text">One planned on-bottom track per dredge site, from MT_dredging_coords/DredgeLines.csv. Arrow = tow direction (start, green, to end, red). Orange = auto first guess (1 km through the site, the direction that climbs most without cresting the edifice), yellow = auto but flat (under 3 deg: direction weakly constrained), magenta = drawn/edited by hand. "Draw line": pick a site, click the start, then the end on the surface. "Save to repo" writes the CSV (old copy kept in MT_dredging_coords/backups/) and recomputes depths and slopes from the finest grid.</div>
+    </div>
+
+    <div class="control-group">
       <label><input type="checkbox" id="shipToggle"> Show ship position (live GPS + heading)</label>
       <div class="track-buttons"><button id="shipFlyBtn">Go to ship</button></div>
       <div id="shipStatus" class="hint-text"></div>
@@ -135,6 +156,15 @@
       <div id="exportRegionStatus" class="hint-text" style="display: none;"></div>
       <button id="exportGeoTiffBtn">Export visible layers as GeoTIFF</button>
       <div id="exportStatus" class="hint-text">Exports a georeferenced 2D GeoTIFF of every checked (and format-eligible) dataset, composited coarse-to-fine. "Select region" drags a rectangle on the map to export just that area.</div>
+      <div class="native-export">
+        <label>Native-resolution GeoTIFF (from the source grid)</label>
+        <select id="nativeDs"></select>
+        <label class="sub"><input type="checkbox" id="nativeNav" checked> Navigation-safe (classic TIFF, RGB, + .tfw/.prj)</label>
+        <label class="sub"><input type="checkbox" id="nativeWgs84"> Also a WGS-84 copy (projected sources only)</label>
+        <label class="sub"><input type="checkbox" id="nativeSlope" checked> Also slope (deg, at the grid's own cells)</label>
+        <button id="nativeExportBtn">Export native GeoTIFF (region or current view)</button>
+        <div id="nativeStatus" class="hint-text">Cuts the selected region (or, if none, the current view) straight out of the original grid file: 1 pixel = 1 grid cell, no resampling, the grid's own CRS. Downloads a zip with an elevation GeoTIFF (float32, metres), a colour GeoTIFF for chart/nav display (using the colour map picked in that layer's legend, if any), a slope GeoTIFF + picture, a map PNG and an info file. Needs run_viewer.py.</div>
+      </div>
     </div>
   </div>
 

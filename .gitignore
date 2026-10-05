@@ -56,3 +56,7 @@ Viewer3D/style.css
 Viewer3D/run_viewer.py
 Viewer3D/Combined_Cruise_Sites_Robust.csv
 Viewer3D/test_track_points.csv
+
+# generated outputs: native-resolution renders (many GB) and per-dredge packets (include MV1007 clips, non-public)
+Native_Maps/
+Dredge_Packets/

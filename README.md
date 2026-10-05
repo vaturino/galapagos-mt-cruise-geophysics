@@ -14,7 +14,10 @@ and is not versioned in this repository.
 | `GMRT_regional/` | Individual-cruise bathymetry, backscatter, gravity, magnetics, and seismic products for the wider corridor, pulled from the Marine Geoscience Data System (MGDS), plus a regional GMRT basemap grid. See [`GMRT_regional/README.md`](GMRT_regional/README.md). |
 | `Viewer3D_NewLayout/` | The offline, self-contained 3D viewer (CesiumJS) to actually use -- bathymetry, backscatter, geophysics layers, and cruise-site track points (dredge/MT, shaped and coloured by status) together. See its own [`README.md`](Viewer3D_NewLayout/README.md) for what it adds on top of the original layout, and [`Viewer3D/README.md`](Viewer3D/README.md) for the full dataset/setup reference both viewers share. |
 | `Viewer3D/` | The original viewer layout. Superseded by `Viewer3D_NewLayout/` and no longer tracked here -- kept locally only (see `Viewer3D_NewLayout/README.md`'s "About `Viewer3D/`"). Its `README.md` stays in this repo since it's the fuller technical reference (dataset table, known data-quality issues, setup) that `Viewer3D_NewLayout/` doesn't duplicate. |
-| `scripts/` | Python tooling for extracting, converting, validating, and meshing the datasets referenced above. See [`scripts/README.md`](scripts/README.md). |
+| `scripts/` | Python tooling for extracting, converting, validating, and meshing the datasets referenced above, plus `native_render.py` (every dataset, or any box, at native resolution as GeoTIFF/PNG, with slope). See [`scripts/README.md`](scripts/README.md). |
+| `MT_dredging_coords/` | The AT53-04 site lists: `DredgeSites.csv` (30 permit dredge sites), `MTsites.csv` (90 MT sites), `DredgeLines.csv` (one planned tow per dredge site). |
+| `Site_Maps/` | Site maps and coordinate tables, previous-dredge maps, dredge-line planning (`dredge_plan.py`) and the per-dredge data packets (`make_dredge_packets.py`). See [`Site_Maps/README.md`](Site_Maps/README.md) and [`Site_Maps/HOW_TO_RUN.md`](Site_Maps/HOW_TO_RUN.md). |
+| `Native_Maps/`, `Dredge_Packets/` | Generated outputs, local only (not in git): every dataset at native resolution (~10 GB), and one folder per planned dredge. Each has its own `README.md`. Regenerate with the scripts above. |
 | `DATA_MANIFEST.md` | Every dataset this project uses: source, identifier, format, size, and how to (re)obtain it. |
 
 ## Setup
@@ -36,6 +39,12 @@ activate` first; see [`scripts/README.md`](scripts/README.md)'s "One-time
 setup" for why that matters. A couple of scripts
 (`extract_geomapapp_layers.py`, the mmap-based inspectors) are stdlib-only
 and need no environment at all.
+
+The mapping and planning code (`scripts/native_render.py`, everything in
+`Site_Maps/`) also needs matplotlib, cartopy, geopandas, cmocean and pyproj,
+which the venv does not have. On the cruise laptop use the conda
+environment `claude-science-env`. Elsewhere:
+`conda create -n sitemaps -c conda-forge python=3.11 numpy scipy pandas matplotlib cartopy geopandas shapely rasterio pyproj cmocean cmcrameri openpyxl pytest`.
 
 ## Data
 

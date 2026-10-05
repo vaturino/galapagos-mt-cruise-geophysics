@@ -1,0 +1,31 @@
+site,start_lat,start_lon,end_lat,end_lon,length_m,azimuth_deg,start_depth_m,end_depth_m,site_depth_m,mean_slope_deg,max_slope_deg,grid,grid_cell_m,source,note
+1,0.698356,-91.214199,0.707365,-91.214981,1000.0,355.0,1885.0,1689.0,1748.0,11.1,31.0,Mittelstaedt_50m,50.1,auto,
+2,0.746755,-91.27443,0.755661,-91.27287,1000.0,10.0,1179.0,969.0,1148.0,11.9,31.3,Mittelstaedt_50m,50.1,auto,
+3,0.933798,-91.491179,0.931457,-91.482501,1000.0,105.0,1733.0,1607.0,1699.0,7.2,27.3,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 87 deg off local upslope"
+4,1.083666,-91.631121,1.087488,-91.622979,1000.0,65.0,1607.0,1454.0,1477.0,8.7,25.1,Mittelstaedt_50m,50.1,auto,
+5,1.301565,-91.732772,1.294638,-91.738548,1000.0,220.0,2017.0,1866.0,2014.0,8.6,28.3,Mittelstaedt_50m,50.1,auto,
+6,1.44859,-91.90082,1.443402,-91.90818,1000.0,235.0,1592.0,1518.0,1528.0,4.2,13.7,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 70 deg off local upslope"
+7,1.51158,-92.010181,1.507058,-92.002399,1000.0,120.0,1467.0,1361.0,1409.0,6.1,15.5,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 44 deg off local upslope"
+8,1.724914,-92.071282,1.719101,-92.064398,1000.0,130.0,1293.0,1126.0,1255.0,9.5,24.3,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 40 deg off local upslope"
+9,1.797525,-92.123901,1.789329,-92.127699,1000.0,205.0,1800.0,1729.0,1782.0,4.0,13.1,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 124 deg off local upslope"
+10,1.944584,-92.1916,1.935541,-92.1916,1000.0,180.0,2187.0,2073.0,2183.0,6.5,21.8,Mittelstaedt_50m,50.1,auto,
+11,2.019767,-92.153038,2.012359,-92.147882,1000.0,145.0,2046.0,1973.0,1981.0,4.2,36.7,MV1007_bathymetry,50.1,auto,
+12,2.042826,-92.251298,2.049221,-92.244942,1000.0,45.0,2122.0,2020.0,2106.0,5.8,26.7,MV1007_bathymetry,50.1,auto,
+13,2.127403,-92.291427,2.118667,-92.293753,1000.0,195.0,1848.0,1814.0,1822.0,1.9,13.9,MV1007_bathymetry,50.1,auto,"FLAT: best line climbs only 34 m over 1000 m (1.9 deg); direction is weakly constrained, choose by hand; direction from azimuth search, 143 deg off local upslope"
+14,2.106578,-92.182728,2.100183,-92.176372,1000.0,135.0,1792.0,1768.0,1783.0,1.4,18.8,MV1007_bathymetry,50.1,auto,"FLAT: best line climbs only 25 m over 1000 m (1.4 deg); direction is weakly constrained, choose by hand; direction from azimuth search, 127 deg off local upslope"
+15,2.120601,-92.062948,2.111592,-92.063732,1000.0,185.0,1829.0,1747.0,1788.0,4.7,30.3,MV1007_bathymetry,50.1,auto,
+16,2.094912,-91.857147,2.09109,-91.865293,1000.0,245.0,1729.0,1704.0,1723.0,1.4,5.6,DOA_ETP_MBES,100.0,auto,"FLAT: best line climbs only 24 m over 1000 m (1.4 deg); direction is weakly constrained, choose by hand; direction from azimuth search, 80 deg off local upslope"
+17,1.998372,-91.782007,1.989874,-91.778933,1000.0,160.0,1925.0,1865.0,1886.0,3.4,12.3,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 36 deg off local upslope"
+18,1.86652,-91.764894,1.86809,-91.773746,1000.0,280.0,1885.0,1844.0,1864.0,2.4,5.8,Mittelstaedt_50m,50.1,auto,"FLAT: best line climbs only 41 m over 1000 m (2.4 deg); direction is weakly constrained, choose by hand; direction from azimuth search, 27 deg off local upslope"
+19,1.78943,-91.792053,1.793252,-91.783907,1000.0,65.0,2052.0,1999.0,2006.0,3.0,17.4,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 67 deg off local upslope"
+20,1.58272,-91.629404,1.583508,-91.638356,1000.0,275.0,2078.0,1923.0,1937.0,8.8,26.5,Mittelstaedt_50m,50.1,auto,
+21,1.897047,-91.126279,1.894706,-91.134961,1000.0,255.0,1868.0,1799.0,1808.0,3.9,16.4,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 31 deg off local upslope"
+22,1.897437,-91.235711,1.904365,-91.241489,1000.0,320.0,1741.0,1673.0,1735.0,3.9,14.5,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 47 deg off local upslope"
+23,1.860757,-91.292092,1.867152,-91.298448,1000.0,315.0,1570.0,1503.0,1526.0,3.8,9.7,Mittelstaedt_50m,50.1,auto,
+24,1.75938,-91.302992,1.768389,-91.302208,1000.0,5.0,1845.0,1811.0,1857.0,2.0,15.1,Mittelstaedt_50m,50.1,auto,"FLAT: best line climbs only 34 m over 1000 m (2.0 deg); direction is weakly constrained, choose by hand; direction from azimuth search, 46 deg off local upslope"
+25,1.592435,-91.250787,1.600933,-91.247713,1000.0,20.0,1128.0,1057.0,1118.0,4.0,22.7,Mittelstaedt_50m,50.1,auto,
+26,1.378672,-91.180063,1.38717,-91.183137,1000.0,340.0,1899.0,1749.0,1774.0,8.5,25.1,Mittelstaedt_50m,50.1,auto,
+27,1.296057,-91.175493,1.287322,-91.173167,1000.0,165.0,1822.0,1619.0,1755.0,11.5,33.2,Mittelstaedt_50m,50.1,auto,
+28,1.123392,-91.055963,1.116997,-91.062317,1000.0,225.0,2012.0,1892.0,1905.0,6.8,34.4,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 103 deg off local upslope"
+29,1.055698,-91.019897,1.063106,-91.014743,1000.0,35.0,1911.0,1700.0,1874.0,11.9,27.8,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 26 deg off local upslope"
+30,0.99308,-90.99067,1.002123,-90.99067,1000.0,0.0,2038.0,1931.0,2057.0,6.1,30.9,Mittelstaedt_50m,50.1,auto,"direction from azimuth search, 163 deg off local upslope"

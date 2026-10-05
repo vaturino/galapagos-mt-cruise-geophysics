@@ -337,6 +337,8 @@ function rebuildAllLoaded() {
   updateLegend();
   placeTrackPoints();
   placePrevDredges(true);
+  if (dl.rows.length) dlDraw();
+  if (nativeInit.viewerIds) nativeSuggest();
   updateCrossSection();
   setLoading(false);
 }
@@ -416,6 +418,8 @@ async function setDatasetVisible(id, visible) {
   updateLegend();
   placeTrackPoints();
   placePrevDredges(true);
+  if (dl.rows.length) dlDraw();
+  if (nativeInit.viewerIds) nativeSuggest();
   updateCrossSection();
   // Only auto-frame when going from "nothing visible" to "something visible" --
   // otherwise this would yank the camera away from wherever you've manually
@@ -559,6 +563,7 @@ handler.setInputAction((movement) => {
   if (state.crossSection.armed) {
     placeCrossSectionEndpoint(cartesian);
   }
+  if (dl.armed) dlPlacePoint(lonDeg, latDeg, trueDepth);
 }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
 // =====================================================================
@@ -609,6 +614,7 @@ const EXTRA_PALETTES = {
   cividis: { label: "Cividis (colour-blind safe)", stops: [[0.0000,0,34,78], [0.0625,0,46,106], [0.1250,26,56,111], [0.1875,50,67,109], [0.2500,67,78,108], [0.3125,83,90,109], [0.3750,97,101,111], [0.4375,111,112,115], [0.5000,125,124,120], [0.5625,140,136,120], [0.6250,155,148,118], [0.6875,171,160,114], [0.7500,188,174,108], [0.8125,205,187,99], [0.8750,222,201,88], [0.9375,240,216,70], [1.0000,254,232,56]] },
   turbo: { label: "Turbo (high contrast rainbow)", stops: [[0.0000,48,18,59], [0.0625,64,64,162], [0.1250,70,107,227], [0.1875,66,148,255], [0.2500,40,188,235], [0.3125,24,221,194], [0.3750,50,242,152], [0.4375,109,254,98], [0.5000,164,252,60], [0.5625,205,236,52], [0.6250,238,207,58], [0.6875,253,172,52], [0.7500,251,126,33], [0.8125,235,80,14], [0.8750,208,47,5], [0.9375,169,22,1], [1.0000,122,4,3]] },
   spectral: { label: "Spectral (red = deep)", stops: [[0.0000,158,1,66], [0.0625,193,39,74], [0.1250,221,74,76], [0.1875,240,103,68], [0.2500,249,142,82], [0.3125,253,181,103], [0.3750,254,212,129], [0.4375,254,236,159], [0.5000,255,255,190], [0.5625,239,249,166], [0.6250,214,238,155], [0.6875,177,223,163], [0.7500,134,207,165], [0.8125,94,185,169], [0.8750,61,149,184], [0.9375,68,113,178], [1.0000,94,79,162]] },
+  slope: { label: "SLOPE (deg) from the mesh - YlOrRd", slope: true, stops: [[0.0000,255,255,204], [0.0625,255,246,182], [0.1250,255,237,160], [0.1875,254,227,139], [0.2500,254,217,118], [0.3125,254,197,97], [0.3750,254,178,76], [0.4375,253,159,68], [0.5000,253,140,60], [0.5625,252,108,51], [0.6250,252,77,42], [0.6875,239,51,35], [0.7500,226,25,28], [0.8125,207,12,33], [0.8750,187,0,38], [0.9375,157,0,38], [1.0000,128,0,38]] },
   greys: { label: "Greyscale - dark = deep", stops: [[0.0000,0,0,0], [0.0625,17,17,17], [0.1250,36,36,36], [0.1875,58,58,58], [0.2500,81,81,81], [0.3125,98,98,98], [0.3750,114,114,114], [0.4375,132,132,132], [0.5000,149,149,149], [0.5625,169,169,169], [0.6250,189,189,189], [0.6875,203,203,203], [0.7500,217,217,217], [0.8125,228,228,228], [0.8750,240,240,240], [0.9375,247,247,247], [1.0000,255,255,255]] },
 };
 
@@ -620,7 +626,26 @@ const PALETTE_LAND_RGB = [184, 173, 140];
 // Range a chosen palette spans by default. Geophysics layers: their own value range.
 // Bathymetry layers: the water part only (deepest point to sea level, or to the
 // shallowest point if the layer has no land), so the whole ramp goes to the seafloor.
+// Seafloor slope (deg) per vertex from the mesh's own normals (computed at build time from the
+// TRUE, unexaggerated surface): slope = acos(|n . up|), up = the local ellipsoid normal. Smooth
+// vertex normals average the adjacent triangles, i.e. a slope over about two cells of the
+// displayed mesh (meta.effective_resolution_m). Cached per dataset.
+function slopeDegArray(d) {
+  if (d.sections.slope_deg) return d.sections.slope_deg;
+  const n = d.meta.vertex_count, nv = d.sections.normal, lo = d.sections.lon_rad, la = d.sections.lat_rad;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) {
+    const cl = Math.cos(la[i]);
+    const dot = nv[i * 3] * cl * Math.cos(lo[i]) + nv[i * 3 + 1] * cl * Math.sin(lo[i]) + nv[i * 3 + 2] * Math.sin(la[i]);
+    out[i] = (Math.acos(Math.min(1, Math.abs(dot))) * 180) / Math.PI;
+  }
+  d.sections.slope_deg = out;
+  return out;
+}
+const isSlopePalette = (d) => !!(d.palette && EXTRA_PALETTES[d.palette] && EXTRA_PALETTES[d.palette].slope);
+
 function paletteDefaultRange(d) {
+  if (isSlopePalette(d)) return [0, 40];
   if (d.meta.is_geophysics || d.meta.legend_range) return d.meta.legend_range || d.meta.z_range_m;
   const [lo, hi] = d.meta.z_range_m;
   return lo < 0 ? [lo, Math.min(hi, 0)] : [lo, hi];
@@ -680,6 +705,10 @@ function pickColorMetaFor(d, mode) {
   const unit = d.meta.legend_units != null ? d.meta.legend_units : " m";
   const kind = d.meta.legend_kind || "depth";
   if (d.palette && EXTRA_PALETTES[d.palette]) {
+    if (isSlopePalette(d)) {
+      const res = d.meta.effective_resolution_m ? `, ${Math.round(d.meta.effective_resolution_m)} m mesh` : "";
+      return { kind: `slope${res}`, ramp: { stops: paletteStops(d) }, range: [0, 40], unit: "\u00b0", palette: d.palette };
+    }
     return { kind, ramp: { stops: paletteStops(d) }, range: paletteDefaultRange(d), unit, palette: d.palette };
   }
   const range = d.meta.legend_range || d.meta.z_range_m;
@@ -786,7 +815,8 @@ function recolorDatasetForWindow(d, mode, win) {
   const isRelative = !!(colorMeta.ramp && colorMeta.ramp.stops);
   const isGlobe = !!(colorMeta.ramp && colorMeta.ramp.ocean && colorMeta.ramp.land);
   if (!isRelative && !isGlobe) return false;
-  const srcArr = mode === "backscatter" ? d.sections.value_backscatter : (d.sections.value || d.sections.z_m);
+  const srcArr = mode === "backscatter" ? d.sections.value_backscatter
+    : isSlopePalette(d) ? slopeDegArray(d) : (d.sections.value || d.sections.z_m);
   if (!srcArr) return false;
   const n = d.meta.vertex_count;
   const span = win.hi - win.lo || 1e-9;
@@ -799,7 +829,7 @@ function recolorDatasetForWindow(d, mode, win) {
     // accumulated round-trip error for rounding to guard against, unlike
     // the globe branch below.
     const stops = colorMeta.ramp.stops;
-    const landFlat = !!colorMeta.palette && mode === "depth" && !d.meta.is_geophysics && !d.sections.value;
+    const landFlat = !!colorMeta.palette && mode === "depth" && !d.meta.is_geophysics && !d.sections.value && !isSlopePalette(d);
     for (let i = 0; i < n; i++) {
       const t = (srcArr[i] - win.lo) / span;
       const rgb = landFlat && srcArr[i] > 0 ? PALETTE_LAND_RGB : sampleRelativeColorJS(t, stops);
@@ -940,7 +970,7 @@ function buildLegendRow(id, d, colorMeta) {
     palRow.appendChild(sel);
     palRow.appendChild(revLab);
     row.appendChild(palRow);
-    if (colorMeta.palette && !d.meta.is_geophysics && !d.sections.value && d.meta.z_range_m[1] > 0) {
+    if (colorMeta.palette && !isSlopePalette(d) && !d.meta.is_geophysics && !d.sections.value && d.meta.z_range_m[1] > 0) {
       const note = document.createElement("div");
       note.className = "legend-palette-note";
       note.innerHTML = `<span class="legend-land-swatch"></span> land (above sea level)`;
@@ -3311,9 +3341,301 @@ for (const el of document.querySelectorAll('input[name="prevColor"]')) {
 document.getElementById("prevLabels").addEventListener("change", (e) => { prev.labels = e.target.checked; placePrevDredges(); });
 document.getElementById("prevTracks").addEventListener("change", (e) => { prev.tracks = e.target.checked; placePrevDredges(); });
 
+// =====================================================================
+// Dredge lines (planning): MT_dredging_coords/DredgeLines.csv, one on-bottom track per site
+// =====================================================================
+const DL_COLS = ["site", "start_lat", "start_lon", "end_lat", "end_lon", "length_m", "azimuth_deg", "start_depth_m",
+  "end_depth_m", "site_depth_m", "mean_slope_deg", "max_slope_deg", "grid", "grid_cell_m", "source", "note"];
+const dl = { rows: [], entities: [], armed: false, first: null, dirty: false };
+
+function setDlStatus(t) { document.getElementById("dlStatus").textContent = t; }
+const dlNum = (v) => (v === "" || v == null ? NaN : Number(v));
+
+async function dlLoad() {
+  const r = await fetch("sites/DredgeLines.csv", { cache: "no-store" });
+  if (!r.ok) throw new Error(`HTTP ${r.status} (no DredgeLines.csv yet? run Site_Maps/dredge_plan.py seed)`);
+  dlSetRows(parseCsvRows(await r.text()));
+}
+
+function dlSetRows(rows) {
+  dl.rows = rows.map((r) => Object.fromEntries(DL_COLS.map((c) => [c, r[c] ?? ""])));
+  const sel = document.getElementById("dlSite");
+  const keep = sel.value;
+  sel.innerHTML = dl.rows.map((r) => `<option value="${r.site}">D${r.site}</option>`).join("");
+  if (keep) sel.value = keep;
+  dlDraw();
+  dlList();
+}
+
+function dlColor(r) {
+  if (String(r.source).toLowerCase() === "manual") return "#ff3cf0";
+  return /FLAT/.test(r.note) ? "#ffe14d" : "#ff8c1a";
+}
+
+function dlCartesian(lon, lat, depth) {
+  return Cesium.Cartesian3.fromDegrees(lon, lat, Number.isFinite(depth) ? -depth * state.exaggeration : 0);
+}
+
+function dlClear() {
+  for (const e of dl.entities) viewer.entities.remove(e);
+  dl.entities = [];
+}
+
+function dlDraw() {
+  dlClear();
+  if (!document.getElementById("dlToggle").checked) { viewer.scene.requestRender(); return; }
+  const selSite = document.getElementById("dlSite").value;
+  for (const r of dl.rows) {
+    const [la0, lo0, la1, lo1] = [r.start_lat, r.start_lon, r.end_lat, r.end_lon].map(dlNum);
+    if (![la0, lo0, la1, lo1].every(Number.isFinite)) continue;
+    const a = dlCartesian(lo0, la0, dlNum(r.start_depth_m));
+    const b = dlCartesian(lo1, la1, dlNum(r.end_depth_m));
+    const col = Cesium.Color.fromCssColorString(dlColor(r));
+    const wide = String(r.site) === selSite ? 16 : 11;
+    const mat = new Cesium.PolylineArrowMaterialProperty(col);
+    dl.entities.push(viewer.entities.add({ polyline: { positions: [a, b], width: wide, material: mat, depthFailMaterial: mat } }));
+    for (const [p, c] of [[a, "#2bd14f"], [b, "#ff3b3b"]]) {
+      dl.entities.push(viewer.entities.add({
+        position: p,
+        point: { pixelSize: 8, color: Cesium.Color.fromCssColorString(c), outlineColor: Cesium.Color.BLACK,
+                 outlineWidth: 1.5, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      }));
+    }
+    const len = dlNum(r.length_m), az = dlNum(r.azimuth_deg);
+    const d0 = dlNum(r.start_depth_m), d1 = dlNum(r.end_depth_m);
+    dl.entities.push(viewer.entities.add({
+      position: Cesium.Cartesian3.midpoint(a, b, new Cesium.Cartesian3()),
+      label: {
+        text: `D${r.site}  ${Number.isFinite(d0) ? Math.round(d0) : "?"}→${Number.isFinite(d1) ? Math.round(d1) : "?"} m` +
+          `  ${Number.isFinite(len) ? (len / 1000).toFixed(2) : "?"} km  ${Number.isFinite(az) ? az.toFixed(0) : "?"}°`,
+        font: "bold 12px sans-serif", fillColor: col, outlineColor: Cesium.Color.BLACK, outlineWidth: 3,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE, pixelOffset: new Cesium.Cartesian2(10, -10),
+        horizontalOrigin: Cesium.HorizontalOrigin.LEFT, disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 300000),
+      },
+    }));
+  }
+  renderSoon();
+}
+
+function dlList() {
+  const el = document.getElementById("dlList");
+  const f = (v, d = 0) => (Number.isFinite(dlNum(v)) ? dlNum(v).toFixed(d) : "");
+  el.innerHTML = `<table><tr><th>site</th><th>start→end m</th><th>km</th><th>az</th><th>slope</th><th></th></tr>` +
+    dl.rows.map((r) => `<tr data-site="${r.site}" title="${(r.note || "").replace(/"/g, "'")} [${r.grid} ${f(r.grid_cell_m)} m]">` +
+      `<td>D${r.site}</td><td>${f(r.start_depth_m)}→${f(r.end_depth_m)}</td><td>${(dlNum(r.length_m) / 1000).toFixed(2)}</td>` +
+      `<td>${f(r.azimuth_deg)}°</td><td>${f(r.mean_slope_deg, 1)}°</td>` +
+      `<td style="color:${dlColor(r)}">${String(r.source).toLowerCase() === "manual" ? "hand" : /FLAT/.test(r.note) ? "flat" : "auto"}</td></tr>`).join("") +
+    "</table>";
+  for (const tr of el.querySelectorAll("tr[data-site]")) {
+    tr.addEventListener("click", () => { document.getElementById("dlSite").value = tr.dataset.site; dlDraw(); dlFly(); });
+  }
+}
+
+function dlSelected() {
+  return dl.rows.find((r) => String(r.site) === document.getElementById("dlSite").value);
+}
+
+function dlFly() {
+  const r = dlSelected();
+  if (!r) return;
+  const lat = (dlNum(r.start_lat) + dlNum(r.end_lat)) / 2, lon = (dlNum(r.start_lon) + dlNum(r.end_lon)) / 2;
+  viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(lon, lat, 9000), duration: 1.0 });
+}
+
+// geodesic length (m) and initial bearing (deg from true N) on the WGS-84 ellipsoid
+function dlGeodesic(lat0, lon0, lat1, lon1) {
+  const g = new Cesium.EllipsoidGeodesic(Cesium.Cartographic.fromDegrees(lon0, lat0), Cesium.Cartographic.fromDegrees(lon1, lat1));
+  return { length: g.surfaceDistance, azimuth: (Cesium.Math.toDegrees(g.startHeading) + 360) % 360 };
+}
+
+function dlPlacePoint(lon, lat, depth) {
+  const r = dlSelected();
+  if (!r) { dl.armed = false; return; }
+  if (!dl.first) {
+    dl.first = { lon, lat, depth };
+    setDlStatus(`D${r.site}: start set (${lat.toFixed(5)}, ${lon.toFixed(5)}, ~${Math.round(depth)} m). Now click the END of the tow.`);
+    return;
+  }
+  const s = dl.first, g = dlGeodesic(s.lat, s.lon, lat, lon);
+  Object.assign(r, {
+    start_lat: s.lat.toFixed(6), start_lon: s.lon.toFixed(6), end_lat: lat.toFixed(6), end_lon: lon.toFixed(6),
+    length_m: g.length.toFixed(1), azimuth_deg: g.azimuth.toFixed(1), start_depth_m: Math.round(s.depth),
+    end_depth_m: Math.round(depth), mean_slope_deg: (Math.atan(Math.abs(depth - s.depth) / g.length) * 180 / Math.PI).toFixed(1),
+    max_slope_deg: "", source: "manual", note: "drawn in viewer (depths from the picked surface until saved)",
+  });
+  dl.armed = false;
+  dl.first = null;
+  dl.dirty = true;
+  setDlStatus(`D${r.site}: new line ${(g.length / 1000).toFixed(2)} km at ${g.azimuth.toFixed(0)}°. Not saved yet -- "Save to repo" to keep it.`);
+  dlDraw();
+  dlList();
+}
+
+function dlCsv() {
+  const q = (v) => (/[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+  return DL_COLS.join(",") + "\n" + dl.rows.map((r) => DL_COLS.map((c) => q(r[c] ?? "")).join(",")).join("\n") + "\n";
+}
+
+function dlDownload(name, text, type) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type }));
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+const xmlEsc = (s) => String(s).replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" }[c]));
+
+function dlGpx() {
+  const pts = (r) => [["S", r.start_lat, r.start_lon, r.start_depth_m], ["E", r.end_lat, r.end_lon, r.end_depth_m]];
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="AT53-04 viewer" xmlns="http://www.topografix.com/GPX/1/1">\n` +
+    dl.rows.map((r) => pts(r).map(([k, la, lo, d]) => `<wpt lat="${la}" lon="${lo}"><name>D${r.site}-${k}</name><desc>${k === "S" ? "start" : "end"} of tow, ${d} m</desc></wpt>`).join("\n")).join("\n") + "\n" +
+    dl.rows.map((r) => `<rte><name>D${r.site}</name><desc>${xmlEsc(`${r.length_m} m at ${r.azimuth_deg} deg, ${r.start_depth_m}->${r.end_depth_m} m. ${r.note || ""}`)}</desc>` +
+      pts(r).map(([k, la, lo, d]) => `<rtept lat="${la}" lon="${lo}"><name>D${r.site}-${k}</name></rtept>`).join("") + "</rte>").join("\n") +
+    "\n</gpx>\n";
+}
+
+function dlKml() {
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>AT53-04 dredge lines</name>\n` +
+    `<Style id="l"><LineStyle><color>ff1a8cff</color><width>4</width></LineStyle></Style>\n` +
+    dl.rows.map((r) => `<Placemark><name>D${r.site}</name><description>${xmlEsc(`${r.length_m} m at ${r.azimuth_deg} deg, ${r.start_depth_m}->${r.end_depth_m} m (${r.source}). ${r.note || ""}`)}</description>` +
+      `<styleUrl>#l</styleUrl><LineString><coordinates>${r.start_lon},${r.start_lat},0 ${r.end_lon},${r.end_lat},0</coordinates></LineString></Placemark>\n` +
+      `<Placemark><name>D${r.site} start</name><Point><coordinates>${r.start_lon},${r.start_lat},0</coordinates></Point></Placemark>\n` +
+      `<Placemark><name>D${r.site} end</name><Point><coordinates>${r.end_lon},${r.end_lat},0</coordinates></Point></Placemark>`).join("\n") +
+    "\n</Document></kml>\n";
+}
+
+document.getElementById("dlToggle").addEventListener("change", async (e) => {
+  if (e.target.checked && !dl.rows.length) {
+    try { await dlLoad(); setDlStatus(`${dl.rows.length} lines loaded.`); } catch (err) { setDlStatus(`Could not load: ${err.message}`); }
+  }
+  dlDraw();
+});
+document.getElementById("dlSite").addEventListener("change", () => dlDraw());
+document.getElementById("dlFlyBtn").addEventListener("click", dlFly);
+document.getElementById("dlDrawBtn").addEventListener("click", () => {
+  const r = dlSelected();
+  if (!r) { setDlStatus("Tick the layer and pick a site first."); return; }
+  dl.armed = true;
+  dl.first = null;
+  setDlStatus(`D${r.site}: click the START of the tow on the surface (deep end, usually), then the END.`);
+});
+document.getElementById("dlReverseBtn").addEventListener("click", () => {
+  const r = dlSelected();
+  if (!r) return;
+  [r.start_lat, r.end_lat] = [r.end_lat, r.start_lat];
+  [r.start_lon, r.end_lon] = [r.end_lon, r.start_lon];
+  [r.start_depth_m, r.end_depth_m] = [r.end_depth_m, r.start_depth_m];
+  r.azimuth_deg = ((dlNum(r.azimuth_deg) + 180) % 360).toFixed(1);
+  r.source = "manual";
+  dl.dirty = true;
+  setDlStatus(`D${r.site} reversed. Not saved yet.`);
+  dlDraw();
+  dlList();
+});
+document.getElementById("dlSaveBtn").addEventListener("click", async () => {
+  setDlStatus("Saving and recomputing depths from the grids...");
+  try {
+    const r = await fetch("sites/DredgeLines.csv", { method: "POST", body: dlCsv(), headers: { "Content-Type": "text/csv" } });
+    const text = await r.text();
+    if (!r.ok) throw new Error(text);
+    dlSetRows(parseCsvRows(text));
+    dl.dirty = false;
+    setDlStatus(`MT_dredging_coords/DredgeLines.csv ${r.headers.get("X-Save-Note") || "saved"}.`);
+  } catch (err) {
+    setDlStatus(`Not saved: ${err.message}`);
+  }
+});
+document.getElementById("dlCsvBtn").addEventListener("click", () => dlDownload("DredgeLines.csv", dlCsv(), "text/csv"));
+document.getElementById("dlGpxBtn").addEventListener("click", () => dlDownload("DredgeLines.gpx", dlGpx(), "application/gpx+xml"));
+document.getElementById("dlKmlBtn").addEventListener("click", () => dlDownload("DredgeLines.kml", dlKml(), "application/vnd.google-earth.kml+xml"));
+window.addEventListener("beforeunload", (e) => { if (dl.dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+// =====================================================================
+// Native-resolution GeoTIFF export (run_viewer.py /export_native -> scripts/native_render.py)
+// =====================================================================
+async function nativeInit() {
+  const sel = document.getElementById("nativeDs");
+  try {
+    const j = await (await fetch("native_datasets", { cache: "no-store" })).json();
+    if (j.error) throw new Error(j.error);
+    sel.innerHTML = j.datasets.map((d) => `<option value="${d.id}">${d.label} (EPSG:${d.epsg})</option>`).join("");
+    nativeInit.viewerIds = j.viewer_ids;
+  } catch (err) {
+    sel.innerHTML = "<option value=''>unavailable</option>";
+    document.getElementById("nativeStatus").textContent = `Native export unavailable: ${err.message}`;
+  }
+}
+
+// default the dropdown to the finest checked layer that has a native source
+function nativeSuggest() {
+  const ids = nativeInit.viewerIds || {};
+  const vis = state.order.filter((id) => state.datasets[id].visible && ids[id]);
+  if (!vis.length) return;
+  const best = vis.reduce((a, b) => ((state.datasets[a].meta?.native_resolution_m ?? 1e9) <=
+    (state.datasets[b].meta?.native_resolution_m ?? 1e9) ? a : b));
+  document.getElementById("nativeDs").value = ids[best];
+}
+
+// viewer palette key -> matplotlib/cmocean/cmcrameri name with the same orientation
+// (endpoints checked: viewer stop t=0 == colormap(0))
+const PALETTE_TO_CMAP = { deep: "cmo.deep_r", haline: "cmo.haline", ice: "cmo.ice", dense: "cmo.dense_r", oslo: "cmc.oslo",
+  batlow: "cmc.batlow", viridis: "viridis", cividis: "cividis", turbo: "turbo", spectral: "Spectral", greys: "gray", slope: "YlOrRd" };
+
+// the colour map chosen in the legend for a viewer layer that shows this native dataset (if any)
+function nativeCmapFor(ds) {
+  const ids = nativeInit.viewerIds || {};
+  const vid = state.order.find((id) => ids[id] === ds && state.datasets[id].palette && state.datasets[id].visible) ||
+    state.order.find((id) => ids[id] === ds && state.datasets[id].palette);
+  if (!vid) return { cmap: "", slope: false };
+  const d = state.datasets[vid];
+  let name = PALETTE_TO_CMAP[d.palette] || "";
+  if (name && d.paletteReverse) name = name.endsWith("_r") ? name.slice(0, -2) : `${name}_r`;
+  return { cmap: name, slope: isSlopePalette(d), from: vid };
+}
+
+document.getElementById("nativeExportBtn").addEventListener("click", async () => {
+  const st = document.getElementById("nativeStatus");
+  const ds = document.getElementById("nativeDs").value;
+  if (!ds) return;
+  let b = state.geoExport.mode === "select" ? state.geoExport.bbox : null;
+  let what = "selected region";
+  if (!b) {
+    const r = viewer.camera.computeViewRectangle();
+    if (!r) { st.textContent = "Can't work out the current view; draw a region instead."; return; }
+    b = { west: Cesium.Math.toDegrees(r.west), east: Cesium.Math.toDegrees(r.east),
+          south: Cesium.Math.toDegrees(r.south), north: Cesium.Math.toDegrees(r.north) };
+    what = "current view";
+  }
+  const pal = nativeCmapFor(ds);
+  const q = new URLSearchParams({ ds, w: b.west.toFixed(6), e: b.east.toFixed(6), s: b.south.toFixed(6), n: b.north.toFixed(6),
+    nav: document.getElementById("nativeNav").checked ? "1" : "0", wgs84: document.getElementById("nativeWgs84").checked ? "1" : "0",
+    slope: document.getElementById("nativeSlope").checked || pal.slope ? "1" : "0" });
+  if (pal.cmap && !pal.slope) q.set("cmap", pal.cmap);
+  st.textContent = (pal.cmap ? `Colour map ${pal.cmap} (from the legend of ${pal.from}). ` : "") +
+    `Cutting ${ds} at native resolution over the ${what} (${b.south.toFixed(3)}..${b.north.toFixed(3)} N, ${b.west.toFixed(3)}..${b.east.toFixed(3)} E)...`;
+  const t0 = performance.now();
+  try {
+    const r = await fetch(`export_native?${q}`);
+    if (!r.ok) throw new Error(await r.text());
+    const blob = await r.blob();
+    const name = (r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/)?.[1] || "native_export.zip";
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    st.textContent = `Downloaded ${name} (${(blob.size / 1e6).toFixed(1)} MB) in ${((performance.now() - t0) / 1000).toFixed(0)} s.`;
+  } catch (err) {
+    st.textContent = `Export failed: ${err.message}`;
+  }
+});
+
 // ---- dataset manifest ----
 async function init() {
   buildTrackLegend();
+  nativeInit().then(nativeSuggest);
   setLoading(true, "Loading dataset list…");
   const manifest = await (await fetch("data/manifest.json")).json();
   buildDatasetRows(manifest);
